@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+**/dist
+**/.env
+.DS_Store
+*.log
+
+# local dev artifacts
+/tmp
