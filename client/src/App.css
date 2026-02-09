@@ -358,6 +358,16 @@
   flex-direction: column;
   gap: 18px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+  min-width: min(560px, 88vw);
+  scroll-snap-align: start;
+}
+
+.balance-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scroll-snap-type: x mandatory;
 }
 
 .balance-title {

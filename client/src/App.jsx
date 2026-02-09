@@ -327,6 +327,41 @@ function App() {
     };
   }, [operations]);
 
+  const accountSummaries = useMemo(() => {
+    const map = new Map();
+    accounts.forEach((acc) => {
+      map.set(acc, { income: 0, expense: 0 });
+    });
+    operations.forEach((op) => {
+      const acc = op.account || "Кошелек";
+      if (!map.has(acc)) map.set(acc, { income: 0, expense: 0 });
+      const bucket = map.get(acc);
+      const value = Number(op.amount || 0);
+      if (op.type === "income") bucket.income += value;
+      else bucket.expense += value;
+    });
+    const total = { income: summary.income, expense: summary.expense };
+    const items = [
+      {
+        key: "all",
+        label: "Все счета",
+        income: total.income,
+        expense: total.expense,
+        balance: total.income - total.expense,
+      },
+    ];
+    map.forEach((value, key) => {
+      items.push({
+        key,
+        label: key,
+        income: value.income,
+        expense: value.expense,
+        balance: value.income - value.expense,
+      });
+    });
+    return items;
+  }, [accounts, operations, summary]);
+
   const visibleOperations = useMemo(() => {
     return operations.filter((op) => {
       if (historyFilter.type !== "all" && op.type !== historyFilter.type) return false;
@@ -609,23 +644,27 @@ function App() {
             </div>
           </section>
 
-          <section className="balance-card">
-            <div>
-              <div className="balance-title">Баланс</div>
-              <div className="balance-value">{formatMoney(summary.balance)}</div>
-              <div className="balance-sub">Всего: {formatMoney(summary.balance)}</div>
-            </div>
-            <div className="balance-row">
-              <div>
-                <div className="balance-label">Доход</div>
-                <div className="balance-positive">{formatMoney(summary.income)}</div>
+          <section className="balance-scroll">
+            {accountSummaries.map((item) => (
+              <div className="balance-card" key={item.key}>
+                <div>
+                  <div className="balance-title">{item.label}</div>
+                  <div className="balance-value">{formatMoney(item.balance)}</div>
+                  <div className="balance-sub">Всего: {formatMoney(item.balance)}</div>
+                </div>
+                <div className="balance-row">
+                  <div>
+                    <div className="balance-label">Доход</div>
+                    <div className="balance-positive">{formatMoney(item.income)}</div>
+                  </div>
+                  <div className="balance-divider" />
+                  <div>
+                    <div className="balance-label">Расход</div>
+                    <div className="balance-negative">{formatMoney(item.expense)}</div>
+                  </div>
+                </div>
               </div>
-              <div className="balance-divider" />
-              <div>
-                <div className="balance-label">Расход</div>
-                <div className="balance-negative">{formatMoney(summary.expense)}</div>
-              </div>
-            </div>
+            ))}
           </section>
         </div>
       </>
