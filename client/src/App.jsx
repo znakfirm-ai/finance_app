@@ -195,35 +195,6 @@ function App() {
     }
   }, [accounts, selectedAccount]);
 
-  const updateBalanceArrows = () => {
-    const el = balanceScrollRef.current;
-    if (!el) return;
-    const maxScroll = el.scrollWidth - el.clientWidth;
-    setShowBalanceLeft(el.scrollLeft > 6);
-    setShowBalanceRight(el.scrollLeft < maxScroll - 6);
-  };
-
-  const scrollBalanceBy = (direction) => {
-    const el = balanceScrollRef.current;
-    if (!el) return;
-    const card = el.querySelector(".balance-card");
-    const offset = card ? card.offsetWidth + 16 : el.clientWidth * 0.8;
-    el.scrollBy({ left: direction * offset, behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    if (view !== "home") return;
-    const el = balanceScrollRef.current;
-    if (!el) return;
-    const handleResize = () => updateBalanceArrows();
-    const raf = requestAnimationFrame(updateBalanceArrows);
-    window.addEventListener("resize", handleResize);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [view, accountSummaries.length]);
-
   async function saveOperation() {
     const trimmed = entryText.trim();
     if (!trimmed) {
@@ -410,6 +381,35 @@ function App() {
     });
     return items;
   }, [accounts, operations, summary]);
+
+  const updateBalanceArrows = () => {
+    const el = balanceScrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setShowBalanceLeft(el.scrollLeft > 6);
+    setShowBalanceRight(el.scrollLeft < maxScroll - 6);
+  };
+
+  const scrollBalanceBy = (direction) => {
+    const el = balanceScrollRef.current;
+    if (!el) return;
+    const card = el.querySelector(".balance-card");
+    const offset = card ? card.offsetWidth + 16 : el.clientWidth * 0.8;
+    el.scrollBy({ left: direction * offset, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    if (view !== "home") return;
+    const el = balanceScrollRef.current;
+    if (!el) return;
+    const handleResize = () => updateBalanceArrows();
+    const raf = requestAnimationFrame(updateBalanceArrows);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [view, accountSummaries.length]);
 
   const visibleOperations = useMemo(() => {
     return operations.filter((op) => {
