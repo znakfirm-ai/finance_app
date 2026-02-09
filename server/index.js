@@ -395,6 +395,52 @@ function wordsToNumber(tokens) {
     лимон: 1000000,
   };
 
+  const hasScaleWord = tokens.some(
+    (token) =>
+      token in scales ||
+      /^тыщ/i.test(token) ||
+      /^косар/i.test(token) ||
+      /^млн/i.test(token) ||
+      /^миллион/i.test(token) ||
+      /^муль/i.test(token) ||
+      /^миль/i.test(token) ||
+      /^лимон/i.test(token)
+  );
+
+  const computeNoScale = (list) => {
+    let total = 0;
+    let used = false;
+    for (const token of list) {
+      if (token in hundreds) {
+        total += hundreds[token];
+        used = true;
+        continue;
+      }
+      if (token in teens) {
+        total += teens[token];
+        used = true;
+        continue;
+      }
+      if (token in tens) {
+        total += tens[token];
+        used = true;
+        continue;
+      }
+      if (token in units) {
+        total += units[token];
+        used = true;
+      }
+    }
+    return { total, used };
+  };
+
+  if (!hasScaleWord && tokens.length >= 2 && tokens[0] in units && units[tokens[0]] > 0) {
+    const rest = computeNoScale(tokens.slice(1));
+    if (rest.used && rest.total >= 100) {
+      return units[tokens[0]] * 1000 + rest.total;
+    }
+  }
+
   let total = 0;
   let current = 0;
   let used = false;
