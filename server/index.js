@@ -472,37 +472,36 @@ function parseAmount(text) {
   let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
   lower = lower.replace(/[\u00a0\u202f]/g, " ");
   const hasScaleWord = /(тыс|тысяч|тыщ|косар|млн|миллион|муль|миль|лимон)/i.test(lower);
-  const spacedMatch = lower.match(/(\d[\d\s.,]*\d)/);
-  const rawSpaced = spacedMatch ? spacedMatch[1] : "";
-  let merged = lower;
-  let prev = null;
-  while (prev !== merged) {
-    prev = merged;
-    merged = merged.replace(/(\d)\s+(?=\d)/g, "$1");
-  }
 
-  const numeric = merged.match(
-    /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/i
-  );
-  if (numeric) {
-    const rawNumber = numeric[1];
-    let normalized = rawNumber;
-    if (/^\d{1,3}([.,]\d{3})+$/.test(rawNumber)) {
-      normalized = rawNumber.replace(/[.,]/g, "");
+  const candidateRe =
+    /(\d[\d\s.,]*\d|\d)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/gi;
+  const candidates = [];
+  let match;
+  while ((match = candidateRe.exec(lower)) !== null) {
+    const rawNumber = match[1];
+    const suffix = match[2] || "";
+    const compact = rawNumber.replace(/[\s\u00a0\u202f]/g, "");
+    let normalized = compact;
+    if (/^\d{1,3}([.,]\d{3})+$/.test(compact)) {
+      normalized = compact.replace(/[.,]/g, "");
     } else {
-      normalized = rawNumber.replace(",", ".");
+      normalized = compact.replace(",", ".");
     }
     let value = Number(normalized);
-    if (
-      !hasScaleWord &&
-      rawSpaced &&
-      /(\d{1,3}([ .,]\d{3}){1,})$/.test(rawSpaced) &&
-      /\b000$/.test(normalized) &&
-      value >= 1000000
-    ) {
-      value = value / 1000;
-    }
-    const suffix = numeric[2] || "";
+    if (!Number.isFinite(value) || value <= 0) continue;
+
+    const hasSuffix =
+      /^к$/i.test(suffix) ||
+      /^кк$/i.test(suffix) ||
+      /^тыс/i.test(suffix) ||
+      /^тыщ/i.test(suffix) ||
+      /^косар/i.test(suffix) ||
+      /^млн/i.test(suffix) ||
+      /^миллион/i.test(suffix) ||
+      /^муль/i.test(suffix) ||
+      /^миль/i.test(suffix) ||
+      /^лимон/i.test(suffix);
+
     if (/^к$/i.test(suffix) || /^тыс/i.test(suffix) || /^тыщ/i.test(suffix) || /^косар/i.test(suffix))
       value *= 1000;
     if (
@@ -514,7 +513,35 @@ function parseAmount(text) {
       /^лимон/i.test(suffix)
     )
       value *= 1000000;
-    if (Number.isFinite(value) && value > 0) return value;
+
+    if (
+      !hasScaleWord &&
+      !hasSuffix &&
+      /(\d{1,3}([ .,]\d{3}){1,})$/.test(rawNumber) &&
+      /\b000$/.test(normalized) &&
+      value >= 1000000
+    ) {
+      value = value / 1000;
+    }
+
+    const digitsCount = compact.replace(/[.,]/g, "").length;
+    const context = lower.slice(
+      Math.max(0, match.index - 8),
+      match.index + rawNumber.length + 8
+    );
+    const hasCurrency = /руб|₽|\bр\b|рубл/i.test(context);
+    let score = digitsCount;
+    if (hasSuffix) score += 4;
+    if (hasCurrency) score += 3;
+    if (value >= 1000) score += 1;
+    candidates.push({ value, score, index: match.index });
+  }
+  if (candidates.length) {
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.index - a.index;
+    });
+    return candidates[0].value;
   }
 
   const tokens = tokenizeWords(lower);
