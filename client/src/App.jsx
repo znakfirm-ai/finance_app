@@ -107,6 +107,8 @@ function App() {
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [editingAccountName, setEditingAccountName] = useState("");
   const [accountEditor, setAccountEditor] = useState(null);
+  const [introStarted, setIntroStarted] = useState(false);
+  const [showIntroGif, setShowIntroGif] = useState(false);
   const balanceScrollRef = useRef(null);
   const [showBalanceLeft, setShowBalanceLeft] = useState(false);
   const [showBalanceRight, setShowBalanceRight] = useState(false);
@@ -1118,6 +1120,20 @@ function App() {
     return (
       <>
         <div className="home-stack">
+          {!introStarted && (
+            <section className="intro-banner">
+              <div className="intro-title">Добро пожаловать</div>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setIntroStarted(true);
+                  setShowIntroGif(true);
+                }}
+              >
+                Старт
+              </button>
+            </section>
+          )}
           <section className="topbar">
             <div className="profile">
               <div className="avatar">D</div>
@@ -1250,6 +1266,20 @@ function App() {
       )}
 
       <main className="content">{content}</main>
+      {showIntroGif && (
+        <div className="gif-overlay" role="dialog" aria-modal="true">
+          <div className="gif-card">
+            <img
+              src="https://99px.ru/sstorage/86/2016/10/image_862610162033291453361.gif"
+              alt="Welcome"
+              className="gif-image"
+            />
+            <button className="btn primary" onClick={() => setShowIntroGif(false)}>
+              Продолжить
+            </button>
+          </div>
+        </div>
+      )}
       <nav className="quick-actions">
         <button
           className={quickActive.home ? "quick-card active" : "quick-card"}
