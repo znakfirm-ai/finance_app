@@ -333,6 +333,32 @@ function App() {
       );
     }
 
+    if (view === "categories") {
+      return (
+        <section className="card">
+          <h2>Категории</h2>
+          <div className="category-grid">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                className="category-card"
+                onClick={() => {
+                  setSelectedCategory(cat);
+                  setEntryText("");
+                  setView("category");
+                }}
+              >
+                <span className="category-icon">
+                  {categoryIcons[cat.name] || "🧾"}
+                </span>
+                <span>{cat.name}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
     if (view === "history") {
       return (
         <section className="card">
@@ -575,37 +601,6 @@ function App() {
             <span>Другое</span>
           </button>
         </section>
-
-        <section className="card">
-          <h2>Категории</h2>
-          <div className="category-grid">
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                className="category-card"
-                onClick={() => {
-                  setSelectedCategory(cat);
-                  setEntryText("");
-                  setView("category");
-                }}
-              >
-                <span className="category-icon">
-                  {categoryIcons[cat.name] || "🧾"}
-                </span>
-                <span>{cat.name}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="card subtle">
-          <div className="section-title">
-            <h2>Список операций</h2>
-            <button className="btn ghost" onClick={() => setView("history")}>
-              Открыть
-            </button>
-          </div>
-        </section>
       </>
     );
   })();
@@ -623,13 +618,13 @@ function App() {
 
       <nav className="nav">
         <button className={view === "home" ? "nav-item active" : "nav-item"} onClick={() => setView("home")}>
+          Главная
+        </button>
+        <button className={view === "categories" ? "nav-item active" : "nav-item"} onClick={() => setView("categories")}>
           Категории
         </button>
         <button className={view === "history" ? "nav-item active" : "nav-item"} onClick={() => setView("history")}>
           История
-        </button>
-        <button className={view === "analytics" ? "nav-item active" : "nav-item"} onClick={() => setView("analytics")}>
-          Аналитика
         </button>
         <button className={view === "accounts" ? "nav-item active" : "nav-item"} onClick={() => setView("accounts")}>
           Счета
