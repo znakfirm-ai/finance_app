@@ -1,7 +1,7 @@
 .page {
   max-width: 720px;
   margin: 0 auto;
-  padding: 32px 16px 160px;
+  padding: 32px 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -23,6 +23,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding-bottom: calc(130px + env(safe-area-inset-bottom));
 }
 
 .card {
@@ -420,7 +421,7 @@
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
   width: min(720px, calc(100% - 24px));
   z-index: 20;
 }
