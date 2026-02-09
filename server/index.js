@@ -93,6 +93,35 @@ async function getTelegramVoiceText(fileId) {
   return transcribeBuffer(buffer, file.file_path || "voice.ogg");
 }
 
+function formatAmount(amount) {
+  if (!Number.isFinite(amount)) return String(amount || "");
+  const isInt = Math.abs(amount % 1) < 0.000001;
+  const value = isInt ? Math.round(amount) : amount;
+  const formatted = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return `${formatted}₽`;
+}
+
+function pickEmoji(text, parsed) {
+  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
+  if (/кофе|кафе/.test(lower)) return "☕";
+  if (/аптек|медиц|клин(ик|икa)/.test(lower)) return "💊";
+  if (/такси/.test(lower)) return "🚕";
+  if (/метро|автобус|транспорт|проезд/.test(lower)) return "🚌";
+  if (/еда|обед|ужин|завтрак|пицц/.test(lower)) return "🍽️";
+  if (/жиль|аренд|квартир|коммун|жкх/.test(lower)) return "🏠";
+  if (/кино|игр|развлеч|музык/.test(lower)) return "🎬";
+  if (/инвест|акци|облиг|крипт/.test(lower)) return "📈";
+  if (parsed?.type === "income") return "💰";
+  return "🧾";
+}
+
+function shortLabel(text, parsed) {
+  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
+  if (/кофе|кафе/.test(lower)) return "кофе";
+  if (parsed?.category) return parsed.category.toLowerCase();
+  return "операция";
+}
+
 function tokenizeWords(text) {
   return String(text || "")
     .toLowerCase()
@@ -399,9 +428,15 @@ app.post("/telegram/webhook", (req, res) => {
 
       operations.unshift(parsed);
       const typeLabel = parsed.type === "income" ? "Доход" : "Расход";
+      const emoji = pickEmoji(text, parsed);
+      const label = shortLabel(text, parsed);
+      const amountText = formatAmount(parsed.amount);
       await telegramApi("sendMessage", {
         chat_id: chatId,
-        text: `${typeLabel}: ${parsed.amount}. Категория: ${parsed.category}. Счет: ${parsed.account}.`,
+        text:
+          `${emoji} ${amountText} ${label}\n` +
+          `${typeLabel} · ${parsed.account}\n` +
+          `Текст: ${text}`,
       });
     } catch (err) {
       console.error("Telegram webhook error:", err?.message || err);
