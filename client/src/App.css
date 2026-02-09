@@ -390,7 +390,7 @@
   border: none;
   background: transparent;
   padding: 6px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(15, 23, 42, 0.6);
   cursor: pointer;
   z-index: 2;
 }
@@ -407,7 +407,7 @@
   width: 18px;
   height: 18px;
   display: block;
-  filter: drop-shadow(0 2px 8px rgba(15, 23, 42, 0.6));
+  filter: drop-shadow(0 1px 4px rgba(15, 23, 42, 0.25));
 }
 
 .balance-chevron.left {
