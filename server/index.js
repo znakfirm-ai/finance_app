@@ -116,10 +116,7 @@ function pickLabelEmoji(text) {
 }
 
 function extractLabel(text, parsed) {
-  let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
-  lower = lower.replace(/[\u00a0\u202f]/g, " ");
-
-  const amountWords = [
+  const amountWords = new Set([
     "ноль",
     "один",
     "одна",
@@ -178,9 +175,9 @@ function extractLabel(text, parsed) {
     "мильон",
     "мильен",
     "лимон",
-  ];
+  ]);
 
-  const stopWords = [
+  const stopWords = new Set([
     "доход",
     "расход",
     "получил",
@@ -237,21 +234,23 @@ function extractLabel(text, parsed) {
     "с",
     "по",
     "на",
-  ];
+  ]);
 
-  lower = lower.replace(
-    /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/gi,
-    " "
-  );
-  lower = lower.replace(/\d+/g, " ");
-  lower = lower.replace(new RegExp(`\\b(${amountWords.join("|")})\\b`, "gi"), " ");
-  lower = lower.replace(new RegExp(`\\b(${stopWords.join("|")})\\b`, "gi"), " ");
-  lower = lower.replace(/\s+/g, " ").trim();
+  const tokens = tokenizeWords(text);
+  const filtered = tokens.filter((token) => {
+    if (!token) return false;
+    if (/^\d/.test(token)) return false;
+    if (amountWords.has(token)) return false;
+    if (stopWords.has(token)) return false;
+    if (/^(тыс|тыщ|кк|косар|млн|миллион|муль|миль|лимон)/i.test(token)) return false;
+    return true;
+  });
 
-  if (!lower) {
+  const label = filtered.join(" ").trim();
+  if (!label) {
     return parsed?.category ? parsed.category : "Операция";
   }
-  return lower.charAt(0).toUpperCase() + lower.slice(1);
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function tokenizeWords(text) {
