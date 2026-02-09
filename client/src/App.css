@@ -5,6 +5,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-height: 100vh;
 }
 
 .header h1 {
@@ -166,33 +167,11 @@
   font-size: 14px;
 }
 
-.nav {
-  position: sticky;
-  bottom: 0;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 8px;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
-}
-
-.nav-item {
-  border: none;
-  background: #f3f4f6;
-  color: #111827;
-  padding: 8px 6px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.nav-item.active {
-  background: #111827;
-  color: #fff;
+.home-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
 }
 
 .category-grid {
@@ -429,6 +408,7 @@
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   padding: 4px 2px;
+  margin-top: auto;
 }
 
 .quick-card {
@@ -452,8 +432,9 @@
   height: 36px;
   border-radius: 12px;
   background: rgba(148, 163, 184, 0.2);
-  display: inline-flex;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 18px;
 }
 

@@ -516,106 +516,108 @@ function App() {
 
     return (
       <>
-        <section className="topbar">
-          <div className="profile">
-            <div className="avatar">D</div>
-            <div className="profile-meta">
-              <span className="profile-label">default</span>
-              <span className="profile-sub">Личные финансы</span>
+        <div className="home-stack">
+          <section className="topbar">
+            <div className="profile">
+              <div className="avatar">D</div>
+              <div className="profile-meta">
+                <span className="profile-label">default</span>
+                <span className="profile-sub">Личные финансы</span>
+              </div>
             </div>
-          </div>
-          <button className="link accent" onClick={() => setView("analytics")}>
-            Графики
-          </button>
-        </section>
+            <button className="link accent" onClick={() => setView("analytics")}>
+              Графики
+            </button>
+          </section>
 
-        <section className="stat-scroll">
-          <div className="stat-card">
-            <div className="stat-icon">🧾</div>
-            <div className="stat-title">
-              {summary.expenseCount === 0 ? "У вас пока нет расходов" : "Расходы за период"}
+          <section className="stat-scroll">
+            <div className="stat-card">
+              <div className="stat-icon">🧾</div>
+              <div className="stat-title">
+                {summary.expenseCount === 0 ? "У вас пока нет расходов" : "Расходы за период"}
+              </div>
             </div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">💳</div>
-            <div className="stat-title">Сейчас на счетах</div>
-            <div className="stat-value">{formatMoney(summary.balance)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">📈</div>
-            <div className="stat-title">Доходы</div>
-            <div className="stat-value">{formatMoney(summary.income)}</div>
-          </div>
-        </section>
+            <div className="stat-card">
+              <div className="stat-icon">💳</div>
+              <div className="stat-title">Сейчас на счетах</div>
+              <div className="stat-value">{formatMoney(summary.balance)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon">📈</div>
+              <div className="stat-title">Доходы</div>
+              <div className="stat-value">{formatMoney(summary.income)}</div>
+            </div>
+          </section>
 
-        <section className="balance-card">
-          <div>
-            <div className="balance-title">Баланс</div>
-            <div className="balance-value">{formatMoney(summary.balance)}</div>
-            <div className="balance-sub">Всего: {formatMoney(summary.balance)}</div>
-          </div>
-          <div className="balance-row">
+          <section className="balance-card">
             <div>
-              <div className="balance-label">Доход</div>
-              <div className="balance-positive">{formatMoney(summary.income)}</div>
+              <div className="balance-title">Баланс</div>
+              <div className="balance-value">{formatMoney(summary.balance)}</div>
+              <div className="balance-sub">Всего: {formatMoney(summary.balance)}</div>
             </div>
-            <div className="balance-divider" />
-            <div>
-              <div className="balance-label">Расход</div>
-              <div className="balance-negative">{formatMoney(summary.expense)}</div>
+            <div className="balance-row">
+              <div>
+                <div className="balance-label">Доход</div>
+                <div className="balance-positive">{formatMoney(summary.income)}</div>
+              </div>
+              <div className="balance-divider" />
+              <div>
+                <div className="balance-label">Расход</div>
+                <div className="balance-negative">{formatMoney(summary.expense)}</div>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="quick-actions">
-          <button
-            className={quickActive.home ? "quick-card active" : "quick-card"}
-            onClick={() => {
-              setHistoryFilter({ type: "all", category: null });
-              setView("home");
-            }}
-          >
-            <span className="quick-icon">🏠</span>
-            <span>Главная</span>
-          </button>
-          <button
-            className={quickActive.overview ? "quick-card active" : "quick-card"}
-            onClick={() => {
-              setHistoryFilter({ type: "all", category: null });
-              setView("history");
-            }}
-          >
-            <span className="quick-icon">🧭</span>
-            <span>Обзор</span>
-          </button>
-          <button
-            className={quickActive.add ? "quick-card active" : "quick-card"}
-            onClick={() => {
-              setView("categories");
-            }}
-          >
-            <span className="quick-icon">➕</span>
-            <span>Добавить</span>
-          </button>
-          <button
-            className={quickActive.reports ? "quick-card active" : "quick-card"}
-            onClick={() => {
-              setView("analytics");
-            }}
-          >
-            <span className="quick-icon">📊</span>
-            <span>Отчеты</span>
-          </button>
-          <button
-            className={quickActive.settings ? "quick-card active" : "quick-card"}
-            onClick={() => {
-              setView("settings");
-            }}
-          >
-            <span className="quick-icon">⚙️</span>
-            <span>Настройки</span>
-          </button>
-        </section>
+          <section className="quick-actions">
+            <button
+              className={quickActive.home ? "quick-card active" : "quick-card"}
+              onClick={() => {
+                setHistoryFilter({ type: "all", category: null });
+                setView("home");
+              }}
+            >
+              <span className="quick-icon">🏠</span>
+              <span>Главная</span>
+            </button>
+            <button
+              className={quickActive.overview ? "quick-card active" : "quick-card"}
+              onClick={() => {
+                setHistoryFilter({ type: "all", category: null });
+                setView("history");
+              }}
+            >
+              <span className="quick-icon">🧭</span>
+              <span>Обзор</span>
+            </button>
+            <button
+              className={quickActive.add ? "quick-card active" : "quick-card"}
+              onClick={() => {
+                setView("categories");
+              }}
+            >
+              <span className="quick-icon">➕</span>
+              <span>Добавить</span>
+            </button>
+            <button
+              className={quickActive.reports ? "quick-card active" : "quick-card"}
+              onClick={() => {
+                setView("analytics");
+              }}
+            >
+              <span className="quick-icon">📊</span>
+              <span>Отчеты</span>
+            </button>
+            <button
+              className={quickActive.settings ? "quick-card active" : "quick-card"}
+              onClick={() => {
+                setView("settings");
+              }}
+            >
+              <span className="quick-icon">⚙️</span>
+              <span>Настройки</span>
+            </button>
+          </section>
+        </div>
       </>
     );
   })();
@@ -630,24 +632,6 @@ function App() {
       )}
 
       {content}
-
-      <nav className="nav">
-        <button className={view === "home" ? "nav-item active" : "nav-item"} onClick={() => setView("home")}>
-          Главная
-        </button>
-        <button className={view === "categories" ? "nav-item active" : "nav-item"} onClick={() => setView("categories")}>
-          Категории
-        </button>
-        <button className={view === "history" ? "nav-item active" : "nav-item"} onClick={() => setView("history")}>
-          История
-        </button>
-        <button className={view === "accounts" ? "nav-item active" : "nav-item"} onClick={() => setView("accounts")}>
-          Счета
-        </button>
-        <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}>
-          Настройки
-        </button>
-      </nav>
     </div>
   );
 }
