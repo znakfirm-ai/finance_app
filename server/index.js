@@ -203,8 +203,16 @@ function wordsToNumber(tokens) {
 }
 
 function parseAmount(text) {
-  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
-  const numeric = lower.match(
+  let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
+  lower = lower.replace(/[\u00a0\u202f]/g, " ");
+  let merged = lower;
+  let prev = null;
+  while (prev !== merged) {
+    prev = merged;
+    merged = merged.replace(/(\d)\s+(?=\d)/g, "$1");
+  }
+
+  const numeric = merged.match(
     /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|млн|миллион[а-я]*)?/i
   );
   if (numeric) {
