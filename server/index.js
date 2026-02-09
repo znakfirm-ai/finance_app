@@ -158,9 +158,21 @@ function wordsToNumber(tokens) {
     тысяча: 1000,
     тысячи: 1000,
     тысяч: 1000,
+    тыща: 1000,
+    тыщи: 1000,
+    тыщ: 1000,
+    косарь: 1000,
+    косаря: 1000,
+    косарей: 1000,
     миллион: 1000000,
     миллиона: 1000000,
     миллионов: 1000000,
+    мульон: 1000000,
+    мульен: 1000000,
+    мульенов: 1000000,
+    мильон: 1000000,
+    мильен: 1000000,
+    лимон: 1000000,
   };
 
   let total = 0;
@@ -188,8 +200,10 @@ function wordsToNumber(tokens) {
       used = true;
       continue;
     }
-    if (token in scales) {
-      const scale = scales[token];
+    if (token in scales || /^тыщ/i.test(token) || /^косар/i.test(token) || /^мул(ь|е)/i.test(token) || /^мил(ь|л)/i.test(token) || /^лимон/i.test(token)) {
+      const scale =
+        scales[token] ||
+        (/^тыщ/i.test(token) || /^косар/i.test(token) ? 1000 : 1000000);
       if (current === 0) current = 1;
       total += current * scale;
       current = 0;
@@ -213,13 +227,21 @@ function parseAmount(text) {
   }
 
   const numeric = merged.match(
-    /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|млн|миллион[а-я]*)?/i
+    /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/i
   );
   if (numeric) {
     let value = Number(numeric[1].replace(",", "."));
     const suffix = numeric[2] || "";
-    if (/^к$/i.test(suffix) || /^тыс/i.test(suffix)) value *= 1000;
-    if (/^кк$/i.test(suffix) || /^млн/i.test(suffix) || /^миллион/i.test(suffix))
+    if (/^к$/i.test(suffix) || /^тыс/i.test(suffix) || /^тыщ/i.test(suffix) || /^косар/i.test(suffix))
+      value *= 1000;
+    if (
+      /^кк$/i.test(suffix) ||
+      /^млн/i.test(suffix) ||
+      /^миллион/i.test(suffix) ||
+      /^муль/i.test(suffix) ||
+      /^миль/i.test(suffix) ||
+      /^лимон/i.test(suffix)
+    )
       value *= 1000000;
     if (Number.isFinite(value) && value > 0) return value;
   }
