@@ -4,6 +4,66 @@ import "./App.css";
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const apiUrl = (path) => `${API_BASE}${path}`;
 
+const IconHome = () => (
+  <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
+    <path
+      d="M4 10.5L12 4l8 6.5v7.5a1 1 0 0 1-1 1h-5.5v-6h-3v6H5a1 1 0 0 1-1-1v-7.5z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconGrid = () => (
+  <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
+    <path
+      d="M5 5h4v4H5V5zm10 0h4v4h-4V5zM5 15h4v4H5v-4zm10 0h4v4h-4v-4z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconPlus = () => (
+  <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
+    <path
+      d="M12 5v14M5 12h14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const IconChart = () => (
+  <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
+    <path
+      d="M4 19h16M7 16v-6m5 6V8m5 8v-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const IconSettings = () => (
+  <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
+    <path
+      d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm7 3.5a7.02 7.02 0 0 0-.2-1.7l2-1.5-2-3.5-2.3.7a7.2 7.2 0 0 0-2.9-1.7L11 2h-4l-.6 2.3a7.2 7.2 0 0 0-2.9 1.7L1.2 5.3l-2 3.5 2 1.5c-.1.6-.2 1.1-.2 1.7s.1 1.1.2 1.7l-2 1.5 2 3.5 2.3-.7a7.2 7.2 0 0 0 2.9 1.7L7 22h4l.6-2.3a7.2 7.2 0 0 0 2.9-1.7l2.3.7 2-3.5-2-1.5c.1-.6.2-1.1.2-1.7z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 function App() {
   const [view, setView] = useState("home");
   const [operations, setOperations] = useState([]);
@@ -567,56 +627,6 @@ function App() {
               </div>
             </div>
           </section>
-
-          <section className="quick-actions">
-            <button
-              className={quickActive.home ? "quick-card active" : "quick-card"}
-              onClick={() => {
-                setHistoryFilter({ type: "all", category: null });
-                setView("home");
-              }}
-            >
-              <span className="quick-icon">🏠</span>
-              <span>Главная</span>
-            </button>
-            <button
-              className={quickActive.overview ? "quick-card active" : "quick-card"}
-              onClick={() => {
-                setHistoryFilter({ type: "all", category: null });
-                setView("history");
-              }}
-            >
-              <span className="quick-icon">🧭</span>
-              <span>Обзор</span>
-            </button>
-            <button
-              className={quickActive.add ? "quick-card add active" : "quick-card add"}
-              onClick={() => {
-                setView("categories");
-              }}
-            >
-              <span className="quick-icon">➕</span>
-              <span>Добавить</span>
-            </button>
-            <button
-              className={quickActive.reports ? "quick-card active" : "quick-card"}
-              onClick={() => {
-                setView("analytics");
-              }}
-            >
-              <span className="quick-icon">📊</span>
-              <span>Отчеты</span>
-            </button>
-            <button
-              className={quickActive.settings ? "quick-card active" : "quick-card"}
-              onClick={() => {
-                setView("settings");
-              }}
-            >
-              <span className="quick-icon">⚙️</span>
-              <span>Настройки</span>
-            </button>
-          </section>
         </div>
       </>
     );
@@ -631,7 +641,56 @@ function App() {
         </header>
       )}
 
-      {content}
+      <main className="content">{content}</main>
+      <nav className="quick-actions">
+        <button
+          className={quickActive.home ? "quick-card active" : "quick-card"}
+          onClick={() => {
+            setHistoryFilter({ type: "all", category: null });
+            setView("home");
+          }}
+        >
+          <IconHome />
+          <span>Главная</span>
+        </button>
+        <button
+          className={quickActive.overview ? "quick-card active" : "quick-card"}
+          onClick={() => {
+            setHistoryFilter({ type: "all", category: null });
+            setView("history");
+          }}
+        >
+          <IconGrid />
+          <span>Обзор</span>
+        </button>
+        <button
+          className={quickActive.add ? "quick-card add active" : "quick-card add"}
+          onClick={() => {
+            setView("categories");
+          }}
+        >
+          <IconPlus />
+          <span>Добавить</span>
+        </button>
+        <button
+          className={quickActive.reports ? "quick-card active" : "quick-card"}
+          onClick={() => {
+            setView("analytics");
+          }}
+        >
+          <IconChart />
+          <span>Отчеты</span>
+        </button>
+        <button
+          className={quickActive.settings ? "quick-card active" : "quick-card"}
+          onClick={() => {
+            setView("settings");
+          }}
+        >
+          <IconSettings />
+          <span>Настройки</span>
+        </button>
+      </nav>
     </div>
   );
 }
