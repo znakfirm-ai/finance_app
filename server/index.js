@@ -547,7 +547,16 @@ function parseAmount(text) {
       if (b.score !== a.score) return b.score - a.score;
       return b.index - a.index;
     });
-    return candidates[0].value;
+    let best = candidates[0].value;
+    if (
+      !hasScaleWord &&
+      best >= 100000 &&
+      best % 1000 === 0 &&
+      best <= 10000000
+    ) {
+      best = best / 1000;
+    }
+    return best;
   }
 
   return null;
