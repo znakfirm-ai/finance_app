@@ -103,6 +103,9 @@ function App() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
+  const [newAccountName, setNewAccountName] = useState("");
+  const [editingAccountId, setEditingAccountId] = useState(null);
+  const [editingAccountName, setEditingAccountName] = useState("");
   const balanceScrollRef = useRef(null);
   const [showBalanceLeft, setShowBalanceLeft] = useState(false);
   const [showBalanceRight, setShowBalanceRight] = useState(false);
@@ -139,10 +142,21 @@ function App() {
 
   async function loadMeta() {
     try {
-      const res = await fetch(apiUrl("/api/meta"));
+      const res = await fetch(apiUrl(withWebQuery("/api/meta")), {
+        headers: authHeaders,
+      });
       const data = await res.json();
-      setAccounts(Array.isArray(data?.accounts) ? data.accounts : []);
       setCurrencyOptions(Array.isArray(data?.currencyOptions) ? data.currencyOptions : []);
+    } catch (_) {}
+  }
+
+  async function loadAccounts() {
+    try {
+      const res = await fetch(apiUrl(withWebQuery("/api/accounts")), {
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      setAccounts(Array.isArray(data) ? data : []);
     } catch (_) {}
   }
 
@@ -186,12 +200,13 @@ function App() {
     loadMeta();
     loadSettings();
     loadCategories();
+    loadAccounts();
     loadOperations();
   }, [telegramReady, initData, webUserId]);
 
   useEffect(() => {
     if (!selectedAccount && accounts.length) {
-      setSelectedAccount(accounts[0]);
+      setSelectedAccount(accounts[0].name);
     }
   }, [accounts, selectedAccount]);
 
@@ -321,6 +336,77 @@ function App() {
     }
   }
 
+  async function createAccount() {
+    const name = newAccountName.trim();
+    if (!name) return;
+    try {
+      const payload = { name };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl("/api/accounts"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setAccounts((prev) => [...prev, data]);
+      setNewAccountName("");
+    } catch (e) {
+      setError(e.message || "Ошибка создания счета");
+    }
+  }
+
+  async function updateAccount(id) {
+    const name = editingAccountName.trim();
+    if (!name) return;
+    try {
+      const payload = { name };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const current = accounts.find((acc) => acc.id === id);
+      const res = await fetch(apiUrl(`/api/accounts/${id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setAccounts((prev) => prev.map((acc) => (acc.id === id ? data : acc)));
+      if (current && selectedAccount === current.name) {
+        setSelectedAccount(data.name);
+      }
+      setEditingAccountId(null);
+      setEditingAccountName("");
+    } catch (e) {
+      setError(e.message || "Ошибка обновления счета");
+    }
+  }
+
+  async function deleteAccount(id) {
+    if (!confirm("Удалить счет?")) return;
+    try {
+      const payload = {};
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const current = accounts.find((acc) => acc.id === id);
+      const res = await fetch(apiUrl(withWebQuery(`/api/accounts/${id}`)), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setAccounts((prev) => prev.filter((acc) => acc.id !== id));
+      if (current && selectedAccount === current.name) {
+        const next = accounts.filter((acc) => acc.id !== id);
+        setSelectedAccount(next[0]?.name || "");
+      }
+    } catch (e) {
+      setError(e.message || "Ошибка удаления счета");
+    }
+  }
+
   const totalsByCategory = useMemo(() => {
     const totals = {};
     operations.forEach((op) => {
@@ -350,11 +436,11 @@ function App() {
   const accountSummaries = useMemo(() => {
     const map = new Map();
     accounts.forEach((acc) => {
-      map.set(acc, { income: 0, expense: 0 });
+      map.set(acc.name, { income: 0, expense: 0 });
     });
     operations.forEach((op) => {
       const acc = op.account || "Кошелек";
-      if (!map.has(acc)) map.set(acc, { income: 0, expense: 0 });
+      if (!map.has(acc)) return;
       const bucket = map.get(acc);
       const value = Number(op.amount || 0);
       if (op.type === "income") bucket.income += value;
@@ -370,10 +456,11 @@ function App() {
         balance: total.income - total.expense,
       },
     ];
-    map.forEach((value, key) => {
+    accounts.forEach((acc) => {
+      const value = map.get(acc.name) || { income: 0, expense: 0 };
       items.push({
-        key,
-        label: key,
+        key: acc.id,
+        label: acc.name,
         income: value.income,
         expense: value.expense,
         balance: value.income - value.expense,
@@ -439,7 +526,7 @@ function App() {
 
   const quickActive = {
     home: view === "home",
-    overview: view === "history",
+    overview: view === "overview",
     add: view === "categories",
     reports: view === "analytics",
     settings: view === "settings",
@@ -467,11 +554,11 @@ function App() {
           <div className="chips">
             {accounts.map((acc) => (
               <button
-                key={acc}
-                className={acc === selectedAccount ? "chip active" : "chip"}
-                onClick={() => setSelectedAccount(acc)}
+                key={acc.id}
+                className={acc.name === selectedAccount ? "chip active" : "chip"}
+                onClick={() => setSelectedAccount(acc.name)}
               >
-                {acc}
+                {acc.name}
               </button>
             ))}
           </div>
@@ -507,6 +594,87 @@ function App() {
               </button>
             ))}
           </div>
+        </section>
+      );
+    }
+
+    if (view === "overview") {
+      return (
+        <section className="card">
+          <h2>Обзор</h2>
+          <div className="overview-grid">
+            <div className="overview-block">
+              <div className="overview-title">Доходы</div>
+              <div className="muted">Заглушка. Скоро будет статистика.</div>
+            </div>
+            <div className="overview-block accounts-block">
+              <div className="overview-title">Счета</div>
+              <div className="row">
+                <input
+                  className="input"
+                  value={newAccountName}
+                  onChange={(e) => setNewAccountName(e.target.value)}
+                  placeholder="Новый счет"
+                />
+                <button className="btn" onClick={createAccount}>
+                  Добавить
+                </button>
+              </div>
+              <ul className="list compact">
+                {accounts.map((acc) => (
+                  <li key={acc.id} className="account-row">
+                    {editingAccountId === acc.id ? (
+                      <>
+                        <input
+                          className="input"
+                          value={editingAccountName}
+                          onChange={(e) => setEditingAccountName(e.target.value)}
+                        />
+                        <button className="btn" onClick={() => updateAccount(acc.id)}>
+                          Сохранить
+                        </button>
+                        <button
+                          className="btn ghost"
+                          onClick={() => {
+                            setEditingAccountId(null);
+                            setEditingAccountName("");
+                          }}
+                        >
+                          Отмена
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span>{acc.name}</span>
+                        <div className="row">
+                          <button
+                            className="btn ghost"
+                            onClick={() => {
+                              setEditingAccountId(acc.id);
+                              setEditingAccountName(acc.name);
+                            }}
+                          >
+                            Редактировать
+                          </button>
+                          <button
+                            className="btn danger"
+                            onClick={() => deleteAccount(acc.id)}
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="overview-block">
+              <div className="overview-title">Расходы</div>
+              <div className="muted">Заглушка. Скоро будет статистика.</div>
+            </div>
+          </div>
+          {error && <div className="error">{error}</div>}
         </section>
       );
     }
@@ -565,8 +733,8 @@ function App() {
           <h2>Счета</h2>
           <ul className="list compact">
             {accounts.map((acc) => (
-              <li key={acc} className="analytics-row">
-                <span>{acc}</span>
+              <li key={acc.id} className="analytics-row">
+                <span>{acc.name}</span>
                 <span className="muted">Баланс позже</span>
               </li>
             ))}
@@ -719,6 +887,18 @@ function App() {
             >
               {accountSummaries.map((item) => (
                 <div className="balance-card" key={item.key}>
+                  {item.key !== "all" && (
+                    <button
+                      className="balance-edit"
+                      onClick={() => {
+                        setView("overview");
+                        setEditingAccountId(item.key);
+                        setEditingAccountName(item.label);
+                      }}
+                    >
+                      ✎
+                    </button>
+                  )}
                   <div>
                     <div className="balance-title">{item.label}</div>
                     <div className="balance-value">{formatMoney(item.balance)}</div>
@@ -768,8 +948,7 @@ function App() {
         <button
           className={quickActive.overview ? "quick-card active" : "quick-card"}
           onClick={() => {
-            setHistoryFilter({ type: "all", category: null });
-            setView("history");
+            setView("overview");
           }}
         >
           <IconGrid />

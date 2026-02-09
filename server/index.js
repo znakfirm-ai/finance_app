@@ -50,7 +50,7 @@ const defaultCategories = [
   { name: "Другое", keywords: [] },
 ];
 
-const accounts = ["Кошелек", "Карта"];
+const defaultAccounts = ["Кошелек", "Карта"];
 
 const currencyOptions = [
   { code: "RUB", symbol: "₽", name: "RUB" },
@@ -187,6 +187,18 @@ async function initDb() {
   `);
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS categories_owner_id_idx ON categories(owner_id);"
+  );
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      name text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS accounts_owner_id_idx ON accounts(owner_id);"
   );
 }
 
@@ -477,6 +489,39 @@ async function getCategoriesForOwner(ownerId) {
         ? []
         : [String(row.name || "").toLowerCase().replace(/ё/g, "е")],
   }));
+}
+
+async function getAccountsForOwner(ownerId) {
+  if (!ownerId || !dbPool) {
+    return defaultAccounts.map((name, index) => ({
+      id: `acc_default_${index}`,
+      name,
+    }));
+  }
+  const { rows } = await dbPool.query(
+    "SELECT id, name FROM accounts WHERE owner_id = $1 ORDER BY created_at ASC",
+    [ownerId]
+  );
+  if (!rows.length) {
+    const now = Date.now();
+    const values = defaultAccounts.map((name, index) => [
+      `acc_${now}_${index}`,
+      ownerId,
+      name,
+    ]);
+    const placeholders = values
+      .map((_, idx) => `($${idx * 3 + 1}, $${idx * 3 + 2}, $${idx * 3 + 3})`)
+      .join(",");
+    await dbPool.query(
+      `INSERT INTO accounts (id, owner_id, name) VALUES ${placeholders}`,
+      values.flat()
+    );
+    return defaultAccounts.map((name, index) => ({
+      id: `acc_${now}_${index}`,
+      name,
+    }));
+  }
+  return rows.map((row) => ({ id: row.id, name: row.name }));
 }
 
 async function getTelegramVoiceText(fileId) {
@@ -1072,7 +1117,11 @@ const expensePatterns = [
   /списан|списали/i,
 ];
 
-function parseOperation(text, categoriesList = defaultCategories) {
+function parseOperation(
+  text,
+  categoriesList = defaultCategories,
+  accountsList = defaultAccounts
+) {
   const raw = String(text || "").trim();
   if (!raw) return null;
 
@@ -1106,14 +1155,24 @@ function parseOperation(text, categoriesList = defaultCategories) {
     }
   }
 
-  let account = "Кошелек";
+  const accountNames = Array.isArray(accountsList)
+    ? accountsList
+        .map((acc) => (typeof acc === "string" ? acc : acc.name))
+        .filter(Boolean)
+    : defaultAccounts;
+  const defaultAccount = accountNames[0] || "Кошелек";
+  let account = defaultAccount;
   let accountSpecified = false;
-  if (/(карта|с карты|по карте|на карту)/.test(lower)) {
-    account = "Карта";
+  const cardAccount = accountNames.find((name) => /карт/i.test(name));
+  const cashAccount = accountNames.find((name) =>
+    /(кошел|налич|налом|кеш|кэш)/i.test(name)
+  );
+  if (/(карта|с карты|по карте|на карту)/.test(lower) && cardAccount) {
+    account = cardAccount;
     accountSpecified = true;
   }
-  if (/(налич|кошел|налом|кеш|кэш)/.test(lower)) {
-    account = "Кошелек";
+  if (/(налич|кошел|налом|кеш|кэш)/.test(lower) && cashAccount) {
+    account = cashAccount;
     accountSpecified = true;
   }
 
@@ -1166,7 +1225,8 @@ app.post("/api/operations", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
   const categoriesList = await getCategoriesForOwner(owner.ownerId);
-  const parsed = parseOperation(text, categoriesList);
+  const accountsList = await getAccountsForOwner(owner.ownerId);
+  const parsed = parseOperation(text, categoriesList, accountsList);
   if (!parsed) {
     return res.status(400).json({ error: "Could not parse operation" });
   }
@@ -1178,9 +1238,11 @@ app.post("/api/operations", async (req, res) => {
     if (match) parsed.category = match.name;
   }
   if (account) {
-    const acc = accounts.find((a) => a === account);
+    const acc = accountsList.find(
+      (a) => String(a.name).toLowerCase() === String(account).toLowerCase()
+    );
     if (acc) {
-      parsed.account = acc;
+      parsed.account = acc.name;
       parsed.accountSpecified = true;
     }
   }
@@ -1287,7 +1349,10 @@ app.post("/telegram/webhook", (req, res) => {
       const categoriesList = telegramUserId
         ? await getCategoriesForOwner(telegramUserId)
         : defaultCategories;
-      const parsed = parseOperation(text, categoriesList);
+      const accountsList = telegramUserId
+        ? await getAccountsForOwner(telegramUserId)
+        : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
+      const parsed = parseOperation(text, categoriesList, accountsList);
       if (!parsed) {
         await telegramApi("sendMessage", {
           chat_id: chatId,
@@ -1315,9 +1380,9 @@ app.post("/telegram/webhook", (req, res) => {
           text: prompt,
           reply_markup: {
             inline_keyboard: [
-              accounts.map((acc) => ({
-                text: acc,
-                callback_data: `account:${acc}`,
+              accountsList.map((acc) => ({
+                text: acc.name,
+                callback_data: `account:${acc.name}`,
               })),
             ],
           },
@@ -1475,6 +1540,135 @@ app.delete("/api/categories/:id", async (req, res) => {
   }
 });
 
+app.get("/api/accounts", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const accountsList = await getAccountsForOwner(owner.ownerId);
+    res.json(accountsList.map((acc) => ({ id: acc.id, name: acc.name })));
+  } catch (err) {
+    console.error("Load accounts failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load accounts" });
+  }
+});
+
+app.post("/api/accounts", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const name = String(req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const existing = await dbPool.query(
+      "SELECT id, name FROM accounts WHERE owner_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1",
+      [owner.ownerId, name]
+    );
+    if (existing.rows.length) {
+      return res.json(existing.rows[0]);
+    }
+    const id = `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    await dbPool.query(
+      "INSERT INTO accounts (id, owner_id, name) VALUES ($1, $2, $3)",
+      [id, owner.ownerId, name]
+    );
+    res.json({ id, name });
+  } catch (err) {
+    console.error("Create account failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create account" });
+  }
+});
+
+app.put("/api/accounts/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const name = String(req.body?.name || "").trim();
+    if (!id || !name) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const current = await dbPool.query(
+      "SELECT name FROM accounts WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!current.rows.length) {
+      return res.status(404).json({ error: "Account not found" });
+    }
+    const oldName = current.rows[0].name;
+    await dbPool.query(
+      "UPDATE accounts SET name = $1 WHERE id = $2 AND owner_id = $3",
+      [name, id, owner.ownerId]
+    );
+    await dbPool.query(
+      "UPDATE operations SET account = $1 WHERE telegram_user_id = $2 AND account = $3",
+      [name, owner.ownerId, oldName]
+    );
+    res.json({ id, name });
+  } catch (err) {
+    console.error("Update account failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update account" });
+  }
+});
+
+app.delete("/api/accounts/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const count = await dbPool.query(
+      "SELECT COUNT(*)::int AS count FROM accounts WHERE owner_id = $1",
+      [owner.ownerId]
+    );
+    if (count.rows[0]?.count <= 1) {
+      return res.status(400).json({ error: "Нужен хотя бы один счет" });
+    }
+    const result = await dbPool.query(
+      "DELETE FROM accounts WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Account not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete account failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete account" });
+  }
+});
+
 app.get("/api/settings", async (req, res) => {
   try {
     const owner = getOwnerFromRequest(req);
@@ -1520,12 +1714,24 @@ app.put("/api/settings", async (req, res) => {
   }
 });
 
-app.get("/api/meta", (req, res) => {
-  res.json({
-    accounts,
-    currencyOptions,
-    defaultCategories: defaultCategories.map((c) => c.name),
-  });
+app.get("/api/meta", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    const accountsList = owner?.ownerId
+      ? await getAccountsForOwner(owner.ownerId)
+      : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
+    res.json({
+      accounts: accountsList.map((acc) => acc.name),
+      currencyOptions,
+      defaultCategories: defaultCategories.map((c) => c.name),
+    });
+  } catch (err) {
+    res.json({
+      accounts: defaultAccounts,
+      currencyOptions,
+      defaultCategories: defaultCategories.map((c) => c.name),
+    });
+  }
 });
 
 initDb()
