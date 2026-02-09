@@ -117,11 +117,27 @@ function lemmatizeTokens(tokens) {
       if (Array.isArray(data.lemmas) && data.lemmas.length) {
         return data.lemmas;
       }
+    } else if (result.status !== 0) {
+      console.error("Lemmatize error:", result.stderr || "unknown error");
     }
   } catch (err) {
     console.error("Lemmatize failed:", err?.message || err);
   }
   return tokens;
+}
+
+function normalizeLemmaToken(token) {
+  const map = [
+    { re: /^стоматолог/i, lemma: "стоматолог" },
+    { re: /^медклиник/i, lemma: "медклиника" },
+    { re: /^кружк/i, lemma: "кружок" },
+    { re: /^плаван/i, lemma: "плавание" },
+    { re: /^саш/i, lemma: "саша" },
+  ];
+  for (const item of map) {
+    if (item.re.test(token)) return item.lemma;
+  }
+  return token;
 }
 
 function pickLabelEmoji(text) {
@@ -271,7 +287,9 @@ function extractLabel(text, parsed) {
     return true;
   });
 
-  const lemmas = lemmatizeTokens(filtered).filter(Boolean);
+  const lemmas = lemmatizeTokens(filtered)
+    .filter(Boolean)
+    .map(normalizeLemmaToken);
   const label = lemmas.join(" ").trim();
   if (!label) {
     return parsed?.category ? parsed.category : "Операция";
