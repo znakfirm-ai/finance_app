@@ -24,7 +24,7 @@ function App() {
       tg.ready();
       if (tg.initData) setInitData(tg.initData);
     }
-    if (!tg) {
+    if (!tg || !tg.initData) {
       const storageKey = "finance_web_user_id";
       let id = localStorage.getItem(storageKey);
       if (!id) {
