@@ -1270,7 +1270,7 @@ function App() {
         <div className="gif-overlay" role="dialog" aria-modal="true">
           <div className="gif-card">
             <img
-              src="https://99px.ru/sstorage/86/2016/10/image_862610162033291453361.gif"
+              src="/intro.gif"
               alt="Welcome"
               className="gif-image"
             />
