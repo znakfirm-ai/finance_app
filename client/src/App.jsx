@@ -1175,7 +1175,13 @@ function App() {
               onScroll={updateBalanceArrows}
             >
               {accountSummaries.map((item) => (
-                <div className="balance-card" key={item.key}>
+                <div
+                  className="balance-card"
+                  key={item.key}
+                  style={{
+                    background: item.key === "all" ? "#0f172a" : item.color || "#0f172a",
+                  }}
+                >
                   {item.key !== "all" && (
                     <button
                       className="balance-edit"
@@ -1190,18 +1196,39 @@ function App() {
                   )}
                   <div>
                     <div className="balance-title">{item.label}</div>
-                    <div className="balance-value">{formatMoney(item.balance)}</div>
-                    <div className="balance-sub">Всего: {formatMoney(item.balance)}</div>
+                    <div className="balance-value">
+                      {formatMoney(
+                        item.balance,
+                        currencySymbolByCode(item.currencyCode || settings.currencyCode)
+                      )}
+                    </div>
+                    <div className="balance-sub">
+                      Всего:{" "}
+                      {formatMoney(
+                        item.balance,
+                        currencySymbolByCode(item.currencyCode || settings.currencyCode)
+                      )}
+                    </div>
                   </div>
                   <div className="balance-row">
                     <div>
                       <div className="balance-label">Доход</div>
-                      <div className="balance-positive">{formatMoney(item.income)}</div>
+                      <div className="balance-positive">
+                        {formatMoney(
+                          item.income,
+                          currencySymbolByCode(item.currencyCode || settings.currencyCode)
+                        )}
+                      </div>
                     </div>
                     <div className="balance-divider" />
                     <div>
                       <div className="balance-label">Расход</div>
-                      <div className="balance-negative">{formatMoney(item.expense)}</div>
+                      <div className="balance-negative">
+                        {formatMoney(
+                          item.expense,
+                          currencySymbolByCode(item.currencyCode || settings.currencyCode)
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
