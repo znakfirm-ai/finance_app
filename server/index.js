@@ -11,6 +11,7 @@ const TRANSCRIBE_PROMPT =
   "Русский язык. Финансовые операции: зарплата, аванс, премия, кэшбек, перевод, оплата, " +
   "медклиника, медицина, аптека, коммуналка, еда, транспорт. Пиши естественные русские формы. " +
   "Числа пиши цифрами без пробелов и разделителей (например 2930, 18545). " +
+  "Нули сохраняй как в речи. Пример: \"сто тысяч\" -> 100000. " +
   "Не добавляй лишние нули к суммам.";
 const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
@@ -606,6 +607,23 @@ function parseAmount(text) {
     /(зарплат|зп|аванс|преми|кэшбек|кешбек|доход|поступлен|поступило|перевод|возврат|инвест|вклад|аренд|ипотек|кредит|долг|квартир|дом|машин|авто|ремонт|продаж|покупк|услуг)/i.test(
       lower
     );
+  const strongIncomeHints = /(зарплат|зп|аванс|преми)/i.test(lower);
+  if (strongIncomeHints) {
+    const quickRe = /(\d[\d\s.,]*\d|\d)/g;
+    let match;
+    let best = null;
+    while ((match = quickRe.exec(lower)) !== null) {
+      const compact = match[1].replace(/[\s\u00a0\u202f]/g, "");
+      const normalized = compact.replace(/[.,]/g, "");
+      if (!/^\d+$/.test(normalized)) continue;
+      if (normalized.length >= 5) {
+        best = normalized;
+        break;
+      }
+    }
+    if (best) return Number(best);
+  }
+
   const wordValue = wordsToNumber(tokens);
   if (wordValue) return wordValue;
 
