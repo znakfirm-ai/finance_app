@@ -518,6 +518,17 @@ function parseAmount(text) {
     )
       value *= 1000000;
 
+    const hasGrouping = /[ \t.,]/.test(rawNumber) && /\d{1,3}([ \t.,]\d{3})+/.test(rawNumber);
+    if (
+      !hasScaleWord &&
+      !hasSuffix &&
+      hasGrouping &&
+      /\b000$/.test(normalized) &&
+      value >= 100000
+    ) {
+      value = value / 1000;
+    }
+
     const digitsCount = compact.replace(/[.,]/g, "").length;
     const context = lower.slice(
       Math.max(0, match.index - 8),
