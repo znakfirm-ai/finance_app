@@ -3,6 +3,7 @@ const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const LEMONFOX_URL = "https://api.lemonfox.ai/v1/audio/transcriptions";
 const TRANSCRIBE_PROMPT =
   "Русский язык. Финансовые операции: зарплата, аванс, премия, кэшбек, перевод, оплата, " +
@@ -10,6 +11,7 @@ const TRANSCRIBE_PROMPT =
 const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
   : null;
+const LEMMATIZE_SCRIPT = path.join(__dirname, "lemmatize.py");
 require("dotenv").config();
 
 const app = express();
@@ -100,6 +102,26 @@ function formatAmount(amount) {
   const value = isInt ? Math.round(amount) : amount;
   const formatted = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   return `${formatted}₽`;
+}
+
+function lemmatizeTokens(tokens) {
+  if (!tokens || tokens.length === 0) return tokens;
+  try {
+    const result = spawnSync("python3", [LEMMATIZE_SCRIPT], {
+      input: JSON.stringify({ tokens }),
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    });
+    if (result.status === 0 && result.stdout) {
+      const data = JSON.parse(result.stdout);
+      if (Array.isArray(data.lemmas) && data.lemmas.length) {
+        return data.lemmas;
+      }
+    }
+  } catch (err) {
+    console.error("Lemmatize failed:", err?.message || err);
+  }
+  return tokens;
 }
 
 function pickLabelEmoji(text) {
@@ -249,7 +271,8 @@ function extractLabel(text, parsed) {
     return true;
   });
 
-  const label = filtered.join(" ").trim();
+  const lemmas = lemmatizeTokens(filtered).filter(Boolean);
+  const label = lemmas.join(" ").trim();
   if (!label) {
     return parsed?.category ? parsed.category : "Операция";
   }

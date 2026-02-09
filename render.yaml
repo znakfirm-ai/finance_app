@@ -4,7 +4,7 @@ services:
     env: node
     plan: free
     rootDir: server
-    buildCommand: npm install
+    buildCommand: npm install && python3 -m pip install --user pymorphy2 pymorphy2-dicts-ru
     startCommand: npm start
     healthCheckPath: /api/meta
     autoDeploy: true
