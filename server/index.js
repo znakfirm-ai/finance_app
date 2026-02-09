@@ -51,6 +51,7 @@ const defaultCategories = [
 ];
 
 const defaultAccounts = ["Кошелек", "Карта"];
+const DEFAULT_ACCOUNT_COLOR = "#0f172a";
 
 const currencyOptions = [
   { code: "RUB", symbol: "₽", name: "RUB" },
@@ -197,6 +198,15 @@ async function initDb() {
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await dbPool.query(
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS currency_code text NOT NULL DEFAULT 'RUB';"
+  );
+  await dbPool.query(
+    `ALTER TABLE accounts ADD COLUMN IF NOT EXISTS color text NOT NULL DEFAULT '${DEFAULT_ACCOUNT_COLOR}';`
+  );
+  await dbPool.query(
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS include_in_balance boolean NOT NULL DEFAULT true;"
+  );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS accounts_owner_id_idx ON accounts(owner_id);"
   );
@@ -496,10 +506,14 @@ async function getAccountsForOwner(ownerId) {
     return defaultAccounts.map((name, index) => ({
       id: `acc_default_${index}`,
       name,
+      currencyCode: "RUB",
+      color: DEFAULT_ACCOUNT_COLOR,
+      includeInBalance: true,
     }));
   }
   const { rows } = await dbPool.query(
-    "SELECT id, name FROM accounts WHERE owner_id = $1 ORDER BY created_at ASC",
+    `SELECT id, name, currency_code, color, include_in_balance
+     FROM accounts WHERE owner_id = $1 ORDER BY created_at ASC`,
     [ownerId]
   );
   if (!rows.length) {
@@ -508,20 +522,36 @@ async function getAccountsForOwner(ownerId) {
       `acc_${now}_${index}`,
       ownerId,
       name,
+      "RUB",
+      DEFAULT_ACCOUNT_COLOR,
+      true,
     ]);
     const placeholders = values
-      .map((_, idx) => `($${idx * 3 + 1}, $${idx * 3 + 2}, $${idx * 3 + 3})`)
+      .map(
+        (_, idx) =>
+          `($${idx * 6 + 1}, $${idx * 6 + 2}, $${idx * 6 + 3}, $${idx * 6 + 4}, $${idx * 6 + 5}, $${idx * 6 + 6})`
+      )
       .join(",");
     await dbPool.query(
-      `INSERT INTO accounts (id, owner_id, name) VALUES ${placeholders}`,
+      `INSERT INTO accounts (id, owner_id, name, currency_code, color, include_in_balance)
+       VALUES ${placeholders}`,
       values.flat()
     );
     return defaultAccounts.map((name, index) => ({
       id: `acc_${now}_${index}`,
       name,
+      currencyCode: "RUB",
+      color: DEFAULT_ACCOUNT_COLOR,
+      includeInBalance: true,
     }));
   }
-  return rows.map((row) => ({ id: row.id, name: row.name }));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    currencyCode: row.currency_code || "RUB",
+    color: row.color || DEFAULT_ACCOUNT_COLOR,
+    includeInBalance: row.include_in_balance !== false,
+  }));
 }
 
 async function getTelegramVoiceText(fileId) {
@@ -1570,6 +1600,13 @@ app.post("/api/accounts", async (req, res) => {
     if (!name) {
       return res.status(400).json({ error: "Name is required" });
     }
+    const currencyCode = String(req.body?.currencyCode || "RUB").toUpperCase();
+    const allowedCurrency = currencyOptions.some((c) => c.code === currencyCode);
+    const color = String(req.body?.color || DEFAULT_ACCOUNT_COLOR).trim();
+    const includeInBalance =
+      req.body?.includeInBalance === false || req.body?.includeInBalance === "false"
+        ? false
+        : true;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
@@ -1578,14 +1615,26 @@ app.post("/api/accounts", async (req, res) => {
       [owner.ownerId, name]
     );
     if (existing.rows.length) {
-      return res.json(existing.rows[0]);
+      return res.json({
+        id: existing.rows[0].id,
+        name: existing.rows[0].name,
+        currencyCode,
+        color,
+        includeInBalance,
+      });
     }
     const id = `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     await dbPool.query(
-      "INSERT INTO accounts (id, owner_id, name) VALUES ($1, $2, $3)",
-      [id, owner.ownerId, name]
+      "INSERT INTO accounts (id, owner_id, name, currency_code, color, include_in_balance) VALUES ($1, $2, $3, $4, $5, $6)",
+      [id, owner.ownerId, name, allowedCurrency ? currencyCode : "RUB", color, includeInBalance]
     );
-    res.json({ id, name });
+    res.json({
+      id,
+      name,
+      currencyCode: allowedCurrency ? currencyCode : "RUB",
+      color,
+      includeInBalance,
+    });
   } catch (err) {
     console.error("Create account failed:", err?.message || err);
     res.status(500).json({ error: "Failed to create account" });
@@ -1603,6 +1652,13 @@ app.put("/api/accounts/:id", async (req, res) => {
     }
     const id = String(req.params.id || "");
     const name = String(req.body?.name || "").trim();
+    const currencyCode = String(req.body?.currencyCode || "RUB").toUpperCase();
+    const allowedCurrency = currencyOptions.some((c) => c.code === currencyCode);
+    const color = String(req.body?.color || DEFAULT_ACCOUNT_COLOR).trim();
+    const includeInBalance =
+      req.body?.includeInBalance === false || req.body?.includeInBalance === "false"
+        ? false
+        : true;
     if (!id || !name) {
       return res.status(400).json({ error: "Invalid input" });
     }
@@ -1618,14 +1674,22 @@ app.put("/api/accounts/:id", async (req, res) => {
     }
     const oldName = current.rows[0].name;
     await dbPool.query(
-      "UPDATE accounts SET name = $1 WHERE id = $2 AND owner_id = $3",
-      [name, id, owner.ownerId]
+      `UPDATE accounts
+       SET name = $1, currency_code = $2, color = $3, include_in_balance = $4
+       WHERE id = $5 AND owner_id = $6`,
+      [name, allowedCurrency ? currencyCode : "RUB", color, includeInBalance, id, owner.ownerId]
     );
     await dbPool.query(
       "UPDATE operations SET account = $1 WHERE telegram_user_id = $2 AND account = $3",
       [name, owner.ownerId, oldName]
     );
-    res.json({ id, name });
+    res.json({
+      id,
+      name,
+      currencyCode: allowedCurrency ? currencyCode : "RUB",
+      color,
+      includeInBalance,
+    });
   } catch (err) {
     console.error("Update account failed:", err?.message || err);
     res.status(500).json({ error: "Failed to update account" });

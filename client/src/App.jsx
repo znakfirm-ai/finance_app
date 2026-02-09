@@ -106,7 +106,7 @@ function App() {
   const [newAccountName, setNewAccountName] = useState("");
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [editingAccountName, setEditingAccountName] = useState("");
-  const [showAccountManager, setShowAccountManager] = useState(false);
+  const [accountEditor, setAccountEditor] = useState(null);
   const balanceScrollRef = useRef(null);
   const [showBalanceLeft, setShowBalanceLeft] = useState(false);
   const [showBalanceRight, setShowBalanceRight] = useState(false);
@@ -210,6 +210,17 @@ function App() {
       setSelectedAccount(accounts[0].name);
     }
   }, [accounts, selectedAccount]);
+
+  const currencySymbolByCode = (code) => {
+    const entry = currencyOptions.find((c) => c.code === code);
+    return entry?.symbol || settings.currencySymbol || "₽";
+  };
+
+  const accountMapById = useMemo(() => {
+    const map = new Map();
+    accounts.forEach((acc) => map.set(acc.id, acc));
+    return map;
+  }, [accounts]);
 
   async function saveOperation() {
     const trimmed = entryText.trim();
@@ -341,7 +352,12 @@ function App() {
     const name = newAccountName.trim();
     if (!name) return;
     try {
-      const payload = { name };
+      const payload = {
+        name,
+        currencyCode: accountEditor?.currencyCode || settings.currencyCode,
+        color: accountEditor?.color || "#0f172a",
+        includeInBalance: accountEditor?.includeInBalance !== false,
+      };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/accounts"), {
@@ -353,6 +369,8 @@ function App() {
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setAccounts((prev) => [...prev, data]);
       setNewAccountName("");
+      setAccountEditor({ ...data, mode: "edit", originalName: data.name });
+      await loadOperations();
     } catch (e) {
       setError(e.message || "Ошибка создания счета");
     }
@@ -362,7 +380,12 @@ function App() {
     const name = editingAccountName.trim();
     if (!name) return;
     try {
-      const payload = { name };
+      const payload = {
+        name,
+        currencyCode: accountEditor?.currencyCode || settings.currencyCode,
+        color: accountEditor?.color || "#0f172a",
+        includeInBalance: accountEditor?.includeInBalance !== false,
+      };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const current = accounts.find((acc) => acc.id === id);
@@ -377,6 +400,8 @@ function App() {
       if (current && selectedAccount === current.name) {
         setSelectedAccount(data.name);
       }
+      setAccountEditor({ ...data, mode: "edit", originalName: data.name });
+      await loadOperations();
       setEditingAccountId(null);
       setEditingAccountName("");
     } catch (e) {
@@ -403,6 +428,8 @@ function App() {
         const next = accounts.filter((acc) => acc.id !== id);
         setSelectedAccount(next[0]?.name || "");
       }
+      setAccountEditor(null);
+      await loadOperations();
     } catch (e) {
       setError(e.message || "Ошибка удаления счета");
     }
@@ -429,10 +456,18 @@ function App() {
   }, [operations]);
 
   const summary = useMemo(() => {
+    const includeMap = new Map();
+    accounts.forEach((acc) => {
+      includeMap.set(acc.name, acc.includeInBalance !== false);
+    });
     let income = 0;
     let expense = 0;
     operations.forEach((op) => {
       const value = Number(op.amount || 0);
+      const include = includeMap.has(op.account)
+        ? includeMap.get(op.account)
+        : true;
+      if (!include) return;
       if (op.type === "income") income += value;
       else expense += value;
     });
@@ -442,7 +477,7 @@ function App() {
       balance: income - expense,
       expenseCount: operations.filter((op) => op.type === "expense").length,
     };
-  }, [operations]);
+  }, [operations, accounts]);
 
   const accountSummaries = useMemo(() => {
     const map = new Map();
@@ -475,6 +510,9 @@ function App() {
         income: value.income,
         expense: value.expense,
         balance: value.income - value.expense,
+        color: acc.color,
+        currencyCode: acc.currencyCode,
+        includeInBalance: acc.includeInBalance !== false,
       });
     });
     return items;
@@ -484,14 +522,6 @@ function App() {
     () => accountSummaries.filter((item) => item.key !== "all"),
     [accountSummaries]
   );
-
-  const accountTotalsMap = useMemo(() => {
-    const map = new Map();
-    accountTiles.forEach((item) => {
-      map.set(item.label, item.balance);
-    });
-    return map;
-  }, [accountTiles]);
 
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
   const incomePages = Math.max(1, Math.ceil(incomeByCategory.length / 4));
@@ -546,14 +576,27 @@ function App() {
       ? categories.map((c) => c.name)
       : ["Еда", "Транспорт", "Жильё", "Развлечения", "Другое"];
 
-  const formatMoney = (value) => {
+  const accountColors = [
+    "#0f172a",
+    "#1e293b",
+    "#0f766e",
+    "#1d4ed8",
+    "#6d28d9",
+    "#be123c",
+    "#0f766e",
+    "#15803d",
+    "#b45309",
+  ];
+
+  const formatMoney = (value, symbolOverride) => {
     const amount = Number(value || 0);
     const hasCents = Math.abs(amount % 1) > 0.001;
     const formatted = amount.toLocaleString("ru-RU", {
       minimumFractionDigits: hasCents ? 2 : 0,
       maximumFractionDigits: 2,
     });
-    return `${formatted} ${settings.currencySymbol || "₽"}`;
+    const symbol = symbolOverride || settings.currencySymbol || "₽";
+    return `${formatted} ${symbol}`;
   };
 
   const quickActive = {
@@ -631,6 +674,21 @@ function App() {
     }
 
     if (view === "overview") {
+      const accountOps = accountEditor
+        ? operations.filter(
+            (op) => op.account === (accountEditor.originalName || accountEditor.name)
+          )
+        : [];
+      const accountIncome = accountOps
+        .filter((op) => op.type === "income")
+        .reduce((sum, op) => sum + Number(op.amount || 0), 0);
+      const accountExpense = accountOps
+        .filter((op) => op.type === "expense")
+        .reduce((sum, op) => sum + Number(op.amount || 0), 0);
+      const accountCurrencySymbol = accountEditor
+        ? currencySymbolByCode(accountEditor.currencyCode || settings.currencyCode)
+        : settings.currencySymbol;
+
       return (
         <section className="overview-shell">
           <div className="overview-header">
@@ -661,20 +719,45 @@ function App() {
                   key={acc.key}
                   className="overview-tile"
                   onClick={() => {
-                    setView("overview");
+                    setAccountEditor({
+                      mode: "edit",
+                      id: acc.key,
+                      name: acc.label,
+                      originalName: acc.label,
+                      currencyCode: acc.currencyCode || settings.currencyCode,
+                      color: acc.color || "#0f172a",
+                      includeInBalance: acc.includeInBalance !== false,
+                    });
                     setEditingAccountId(acc.key);
                     setEditingAccountName(acc.label);
-                    setShowAccountManager(true);
                   }}
+                  style={{ background: acc.color || "#0f172a", color: "#fff" }}
                 >
-                  <div className="overview-icon">💳</div>
+                  <div className="overview-icon inverse">💳</div>
                   <div className="overview-name">{acc.label}</div>
-                  <div className="overview-amount">{formatMoney(acc.balance)}</div>
+                  <div className="overview-amount">
+                    {formatMoney(
+                      acc.balance,
+                      currencySymbolByCode(acc.currencyCode || settings.currencyCode)
+                    )}
+                  </div>
                 </button>
               ))}
               <button
                 className="overview-tile add"
-                onClick={() => setShowAccountManager(true)}
+                onClick={() => {
+                  setAccountEditor({
+                    mode: "create",
+                    name: "",
+                    originalName: "",
+                    currencyCode: settings.currencyCode,
+                    color: "#0f172a",
+                    includeInBalance: true,
+                  });
+                  setEditingAccountId(null);
+                  setEditingAccountName("");
+                  setNewAccountName("");
+                }}
               >
                 <div className="overview-icon">＋</div>
                 <div className="overview-name">Добавить</div>
@@ -687,67 +770,138 @@ function App() {
             </div>
           </div>
 
-          {showAccountManager && (
+          {accountEditor && (
             <div className="overview-manage">
+              <div className="overview-manage-header">
+                <div className="overview-manage-title">
+                  {accountEditor.mode === "create" ? "Новый счет" : "Счет"}
+                </div>
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    setAccountEditor(null);
+                    setEditingAccountId(null);
+                    setEditingAccountName("");
+                  }}
+                >
+                  Закрыть
+                </button>
+              </div>
               <div className="row">
                 <input
                   className="input"
-                  value={newAccountName}
-                  onChange={(e) => setNewAccountName(e.target.value)}
+                  value={accountEditor.mode === "create" ? newAccountName : editingAccountName}
+                  onChange={(e) => {
+                    if (accountEditor.mode === "create") {
+                      setNewAccountName(e.target.value);
+                    } else {
+                      setEditingAccountName(e.target.value);
+                    }
+                  }}
                   placeholder="Новый счет"
                 />
-                <button className="btn" onClick={createAccount}>
-                  Добавить
-                </button>
+                {accountEditor.mode === "create" ? (
+                  <button className="btn" onClick={createAccount}>
+                    Добавить
+                  </button>
+                ) : (
+                  <button className="btn" onClick={() => updateAccount(accountEditor.id)}>
+                    Сохранить
+                  </button>
+                )}
               </div>
-              <ul className="list compact">
-                {accounts.map((acc) => (
-                  <li key={acc.id} className="account-row">
-                    {editingAccountId === acc.id ? (
-                      <>
-                        <input
-                          className="input"
-                          value={editingAccountName}
-                          onChange={(e) => setEditingAccountName(e.target.value)}
-                        />
-                        <button className="btn" onClick={() => updateAccount(acc.id)}>
-                          Сохранить
-                        </button>
-                        <button
-                          className="btn ghost"
-                          onClick={() => {
-                            setEditingAccountId(null);
-                            setEditingAccountName("");
-                          }}
-                        >
-                          Отмена
-                        </button>
-                      </>
+              <div className="row">
+                <label className="label">Валюта</label>
+                <select
+                  className="select"
+                  value={accountEditor.currencyCode}
+                  onChange={(e) =>
+                    setAccountEditor((prev) => ({
+                      ...prev,
+                      currencyCode: e.target.value,
+                    }))
+                  }
+                >
+                  {currencyOptions.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code} {c.symbol}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="row">
+                <label className="label">Цвет</label>
+                <div className="color-row">
+                  {accountColors.map((color) => (
+                    <button
+                      key={color}
+                      className={
+                        accountEditor.color === color ? "color-dot active" : "color-dot"
+                      }
+                      style={{ background: color }}
+                      onClick={() =>
+                        setAccountEditor((prev) => ({
+                          ...prev,
+                          color,
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={accountEditor.includeInBalance !== false}
+                  onChange={(e) =>
+                    setAccountEditor((prev) => ({
+                      ...prev,
+                      includeInBalance: e.target.checked,
+                    }))
+                  }
+                />
+                Учитывать в общем балансе
+              </label>
+              {accountEditor.mode === "edit" && (
+                <button className="btn danger" onClick={() => deleteAccount(accountEditor.id)}>
+                  Удалить счет
+                </button>
+              )}
+
+              {accountEditor.mode === "edit" && (
+                <>
+                  <div className="overview-subtitle">История операций</div>
+                  <ul className="list compact">
+                    {accountOps.length === 0 ? (
+                      <li className="muted">Пока нет операций</li>
                     ) : (
-                      <>
-                        <span>{acc.name}</span>
-                        <div className="row">
-                          <button
-                            className="btn ghost"
-                            onClick={() => {
-                              setEditingAccountId(acc.id);
-                              setEditingAccountName(acc.name);
-                            }}
-                          >
-                            Редактировать
-                          </button>
-                          <button
-                            className="btn danger"
-                            onClick={() => deleteAccount(acc.id)}
-                          >
-                            Удалить
-                          </button>
-                        </div>
-                      </>
+                      accountOps.slice(0, 6).map((op) => (
+                        <li key={op.id} className="analytics-row">
+                          <span>{op.label || op.text}</span>
+                          <strong>
+                            {formatMoney(op.amount, accountCurrencySymbol)}
+                          </strong>
+                        </li>
+                      ))
                     )}
-                  </li>
-                ))}
-              </ul>
+                  </ul>
+                  <div className="overview-subtitle">Отчеты</div>
+                  <div className="overview-report">
+                    <div>
+                      <div className="report-label">Доход</div>
+                      <div className="report-value">
+                        {formatMoney(accountIncome, accountCurrencySymbol)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="report-label">Расход</div>
+                      <div className="report-value">
+                        {formatMoney(accountExpense, accountCurrencySymbol)}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
