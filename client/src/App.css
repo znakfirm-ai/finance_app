@@ -353,28 +353,28 @@
   background: #0f172a;
   color: #f8fafc;
   border-radius: 18px;
-  padding: 18px;
+  padding: 18px 32px;
   display: flex;
   flex-direction: column;
   gap: 18px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
-  min-width: min(560px, 88vw);
+  min-width: 100%;
+  flex: 0 0 100%;
   scroll-snap-align: start;
 }
 
 .balance-slider {
   position: relative;
-  background: #ffffff;
-  border-radius: 20px;
-  padding: 8px 0;
+  background: transparent;
+  padding: 0;
 }
 
 .balance-scroll {
   display: flex;
-  gap: 16px;
+  gap: 0;
   overflow-x: auto;
-  padding: 0 28px;
-  scroll-padding: 28px;
+  padding: 0;
+  scroll-padding: 0;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
 }
@@ -390,23 +390,24 @@
   border: none;
   background: transparent;
   padding: 6px;
-  color: rgba(15, 23, 42, 0.45);
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   z-index: 2;
 }
 
 .balance-arrow.left {
-  left: 4px;
+  left: 10px;
 }
 
 .balance-arrow.right {
-  right: 4px;
+  right: 10px;
 }
 
 .balance-chevron {
   width: 18px;
   height: 18px;
   display: block;
+  filter: drop-shadow(0 2px 8px rgba(15, 23, 42, 0.6));
 }
 
 .balance-chevron.left {
