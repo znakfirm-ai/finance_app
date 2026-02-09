@@ -364,13 +364,17 @@
 
 .balance-slider {
   position: relative;
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 8px 0;
 }
 
 .balance-scroll {
   display: flex;
   gap: 16px;
   overflow-x: auto;
-  padding-bottom: 6px;
+  padding: 0 28px;
+  scroll-padding: 28px;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
 }
@@ -386,22 +390,22 @@
   border: none;
   background: transparent;
   padding: 6px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(15, 23, 42, 0.45);
   cursor: pointer;
   z-index: 2;
 }
 
 .balance-arrow.left {
-  left: 6px;
+  left: 4px;
 }
 
 .balance-arrow.right {
-  right: 6px;
+  right: 4px;
 }
 
 .balance-chevron {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: block;
 }
 
