@@ -293,6 +293,16 @@ function App() {
     return `${formatted} ${settings.currencySymbol || "₽"}`;
   };
 
+  const quickActive = {
+    accounts: view === "accounts",
+    income: view === "history" && historyFilter.type === "income",
+    expense: view === "history" && historyFilter.type === "expense",
+    other:
+      view === "history" &&
+      historyFilter.type === "all" &&
+      historyFilter.category === "Другое",
+  };
+
   const content = (() => {
     if (view === "category" && selectedCategory) {
       return (
@@ -561,7 +571,7 @@ function App() {
 
         <section className="quick-actions">
           <button
-            className="quick-card"
+            className={quickActive.accounts ? "quick-card active" : "quick-card"}
             onClick={() => {
               setHistoryFilter({ type: "all", category: null });
               setView("accounts");
@@ -571,7 +581,7 @@ function App() {
             <span>Все счета</span>
           </button>
           <button
-            className="quick-card"
+            className={quickActive.income ? "quick-card active" : "quick-card"}
             onClick={() => {
               setHistoryFilter({ type: "income", category: null });
               setView("history");
@@ -581,7 +591,7 @@ function App() {
             <span>Доход</span>
           </button>
           <button
-            className="quick-card"
+            className={quickActive.expense ? "quick-card active" : "quick-card"}
             onClick={() => {
               setHistoryFilter({ type: "expense", category: null });
               setView("history");
@@ -591,7 +601,7 @@ function App() {
             <span>Расход</span>
           </button>
           <button
-            className="quick-card"
+            className={quickActive.other ? "quick-card active" : "quick-card"}
             onClick={() => {
               setHistoryFilter({ type: "all", category: "Другое" });
               setView("history");

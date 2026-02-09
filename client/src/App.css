@@ -427,32 +427,50 @@
 .quick-actions {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 12px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
 }
 
 .quick-card {
-  border: none;
-  background: #1f2933;
-  color: #f9fafb;
+  border: 1px solid transparent;
+  background: #f3f4f6;
+  color: #111827;
   border-radius: 16px;
-  padding: 12px 10px;
+  padding: 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
   justify-content: center;
   font-weight: 600;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .quick-icon {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.12);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   display: grid;
   place-items: center;
-  font-size: 18px;
+  font-size: 16px;
+}
+
+.quick-card.active {
+  background: #111827;
+  color: #ffffff;
+  border-color: #111827;
+}
+
+.quick-card.active .quick-icon {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 @media (max-width: 640px) {
