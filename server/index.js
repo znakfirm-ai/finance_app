@@ -134,6 +134,7 @@ function normalizeLemmaToken(token) {
     { re: /^медклиник/i, lemma: "медклиника" },
     { re: /^кружк/i, lemma: "кружок" },
     { re: /^плаван/i, lemma: "плавание" },
+    { re: /^танц/i, lemma: "танцы" },
     { re: /^саш/i, lemma: "саша" },
   ];
   for (const item of map) {
