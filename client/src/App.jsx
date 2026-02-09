@@ -247,6 +247,40 @@ function App() {
     return Object.entries(totals).sort((a, b) => b[1] - a[1]);
   }, [operations]);
 
+  const summary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    operations.forEach((op) => {
+      const value = Number(op.amount || 0);
+      if (op.type === "income") income += value;
+      else expense += value;
+    });
+    return {
+      income,
+      expense,
+      balance: income - expense,
+      expenseCount: operations.filter((op) => op.type === "expense").length,
+    };
+  }, [operations]);
+
+  const categoryIcons = {
+    Еда: "🍽️",
+    Транспорт: "🚌",
+    "Жильё": "🏠",
+    Развлечения: "🎬",
+    Другое: "🧾",
+  };
+
+  const formatMoney = (value) => {
+    const amount = Number(value || 0);
+    const hasCents = Math.abs(amount % 1) > 0.001;
+    const formatted = amount.toLocaleString("ru-RU", {
+      minimumFractionDigits: hasCents ? 2 : 0,
+      maximumFractionDigits: 2,
+    });
+    return `${formatted} ${settings.currencySymbol || "₽"}`;
+  };
+
   const content = (() => {
     if (view === "category" && selectedCategory) {
       return (
@@ -435,33 +469,100 @@ function App() {
     }
 
     return (
-      <section className="card">
-        <h2>Категории</h2>
-        <div className="category-grid">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              className="category-card"
-              onClick={() => {
-                setSelectedCategory(cat);
-                setEntryText("");
-                setView("category");
-              }}
-            >
-              {cat.name}
+      <>
+        <section className="topbar">
+          <div className="profile">
+            <div className="avatar">D</div>
+            <div className="profile-meta">
+              <span className="profile-label">default</span>
+              <span className="profile-sub">Личные финансы</span>
+            </div>
+          </div>
+          <button className="link accent" onClick={() => setView("analytics")}>
+            Графики
+          </button>
+        </section>
+
+        <section className="stat-scroll">
+          <div className="stat-card">
+            <div className="stat-icon">🧾</div>
+            <div className="stat-title">
+              {summary.expenseCount === 0 ? "У вас пока нет расходов" : "Расходы за период"}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon">💳</div>
+            <div className="stat-title">Сейчас на счетах</div>
+            <div className="stat-value">{formatMoney(summary.balance)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-icon">📈</div>
+            <div className="stat-title">Доходы</div>
+            <div className="stat-value">{formatMoney(summary.income)}</div>
+          </div>
+        </section>
+
+        <section className="balance-card">
+          <div>
+            <div className="balance-title">Баланс</div>
+            <div className="balance-value">{formatMoney(summary.balance)}</div>
+            <div className="balance-sub">Всего: {formatMoney(summary.balance)}</div>
+          </div>
+          <div className="balance-row">
+            <div>
+              <div className="balance-label">Доход</div>
+              <div className="balance-positive">{formatMoney(summary.income)}</div>
+            </div>
+            <div className="balance-divider" />
+            <div>
+              <div className="balance-label">Расход</div>
+              <div className="balance-negative">{formatMoney(summary.expense)}</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="card">
+          <h2>Категории</h2>
+          <div className="category-grid">
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                className="category-card"
+                onClick={() => {
+                  setSelectedCategory(cat);
+                  setEntryText("");
+                  setView("category");
+                }}
+              >
+                <span className="category-icon">
+                  {categoryIcons[cat.name] || "🧾"}
+                </span>
+                <span>{cat.name}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="card subtle">
+          <div className="section-title">
+            <h2>Список операций</h2>
+            <button className="btn ghost" onClick={() => setView("history")}>
+              Открыть
             </button>
-          ))}
-        </div>
-      </section>
+          </div>
+        </section>
+      </>
     );
   })();
 
   return (
     <div className="page">
-      <header className="header">
-        <h1>Личные финансы</h1>
-        <p>Выберите категорию и добавьте операцию</p>
-      </header>
+      {view !== "home" && (
+        <header className="header">
+          <h1>Личные финансы</h1>
+          <p>Выберите категорию и добавьте операцию</p>
+        </header>
+      )}
 
       {content}
 

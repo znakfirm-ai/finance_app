@@ -456,7 +456,7 @@ async function getTelegramVoiceText(fileId) {
   return transcribeBuffer(buffer, file.file_path || "voice.ogg");
 }
 
-function formatAmount(amount) {
+function formatAmount(amount, currencySymbol = "₽") {
   if (!Number.isFinite(amount)) return String(amount || "");
   const value = Number(amount);
   const abs = Math.abs(value);
@@ -465,9 +465,9 @@ function formatAmount(amount) {
   const formattedRubles = String(rubles).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   const sign = value < 0 ? "-" : "";
   if (cents > 0) {
-    return `${sign}${formattedRubles},${String(cents).padStart(2, "0")}₽`;
+    return `${sign}${formattedRubles},${String(cents).padStart(2, "0")}${currencySymbol}`;
   }
-  return `${sign}${formattedRubles}₽`;
+  return `${sign}${formattedRubles}${currencySymbol}`;
 }
 
 function lemmatizeTokens(tokens) {
