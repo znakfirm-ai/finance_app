@@ -1580,7 +1580,15 @@ app.get("/api/accounts", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const accountsList = await getAccountsForOwner(owner.ownerId);
-    res.json(accountsList.map((acc) => ({ id: acc.id, name: acc.name })));
+    res.json(
+      accountsList.map((acc) => ({
+        id: acc.id,
+        name: acc.name,
+        currencyCode: acc.currencyCode || "RUB",
+        color: acc.color || DEFAULT_ACCOUNT_COLOR,
+        includeInBalance: acc.includeInBalance !== false,
+      }))
+    );
   } catch (err) {
     console.error("Load accounts failed:", err?.message || err);
     res.status(500).json({ error: "Failed to load accounts" });
@@ -1611,16 +1619,17 @@ app.post("/api/accounts", async (req, res) => {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const existing = await dbPool.query(
-      "SELECT id, name FROM accounts WHERE owner_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1",
+      `SELECT id, name, currency_code, color, include_in_balance
+       FROM accounts WHERE owner_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
       [owner.ownerId, name]
     );
     if (existing.rows.length) {
       return res.json({
         id: existing.rows[0].id,
         name: existing.rows[0].name,
-        currencyCode,
-        color,
-        includeInBalance,
+        currencyCode: existing.rows[0].currency_code || "RUB",
+        color: existing.rows[0].color || DEFAULT_ACCOUNT_COLOR,
+        includeInBalance: existing.rows[0].include_in_balance !== false,
       });
     }
     const id = `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
