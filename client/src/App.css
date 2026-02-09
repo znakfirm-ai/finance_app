@@ -426,24 +426,20 @@
 
 .quick-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 22px;
-  padding: 12px;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  padding: 4px 2px;
 }
 
 .quick-card {
-  border: 1px solid #e5e7eb;
-  background: #f3f4f6;
+  border: none;
+  background: transparent;
   color: #111827;
-  border-radius: 999px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 8px 6px;
   display: flex;
-  flex-direction: row;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   align-items: center;
   justify-content: center;
   font-weight: 600;
@@ -452,24 +448,21 @@
 }
 
 .quick-icon {
-  width: auto;
-  height: auto;
-  border-radius: 0;
-  background: transparent;
-  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.2);
   display: inline-flex;
   place-items: center;
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .quick-card.active {
-  background: #111827;
-  color: #ffffff;
-  border-color: #111827;
+  color: #111827;
 }
 
 .quick-card.active .quick-icon {
-  color: #ffffff;
+  background: rgba(37, 99, 235, 0.2);
 }
 
 @media (max-width: 640px) {
@@ -491,6 +484,6 @@
   }
 
   .quick-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
