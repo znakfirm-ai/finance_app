@@ -583,6 +583,10 @@ function parseAmount(text) {
   lower = lower.replace(/[\u00a0\u202f]/g, " ");
   const tokens = tokenizeWords(lower);
   const hasScaleWord = /(тыс|тысяч|тыщ|косар|млн|миллион|муль|миль|лимон)/i.test(lower);
+  const largeAmountHints =
+    /(зарплат|зп|аванс|преми|кэшбек|кешбек|доход|поступлен|поступило|перевод|возврат|инвест|вклад|аренд|ипотек|кредит|долг|квартир|дом|машин|авто|ремонт|продаж|покупк|услуг)/i.test(
+      lower
+    );
   const wordValue = wordsToNumber(tokens);
   if (wordValue) return wordValue;
 
@@ -630,6 +634,7 @@ function parseAmount(text) {
     const hasGrouping = /[ \t.,]/.test(rawNumber) && /\d{1,3}([ \t.,]\d{3})+/.test(rawNumber);
     if (
       !hasScaleWord &&
+      !largeAmountHints &&
       !hasSuffix &&
       hasGrouping &&
       /\b000$/.test(normalized) &&
@@ -658,6 +663,7 @@ function parseAmount(text) {
     let best = candidates[0].value;
     if (
       !hasScaleWord &&
+      !largeAmountHints &&
       best >= 100000 &&
       best % 1000 === 0 &&
       best <= 10000000
