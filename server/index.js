@@ -39,6 +39,7 @@ const categories = [
 const accounts = ["Кошелек", "Карта"];
 
 const operations = [];
+const pendingOperations = new Map();
 
 async function transcribeBuffer(buffer, filename) {
   if (!process.env.LEMONFOX_API_KEY) {
@@ -101,25 +102,124 @@ function formatAmount(amount) {
   return `${formatted}₽`;
 }
 
-function pickEmoji(text, parsed) {
-  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
-  if (/кофе|кафе/.test(lower)) return "☕";
-  if (/аптек|медиц|клин(ик|икa)/.test(lower)) return "💊";
-  if (/такси/.test(lower)) return "🚕";
-  if (/метро|автобус|транспорт|проезд/.test(lower)) return "🚌";
-  if (/еда|обед|ужин|завтрак|пицц/.test(lower)) return "🍽️";
-  if (/жиль|аренд|квартир|коммун|жкх/.test(lower)) return "🏠";
-  if (/кино|игр|развлеч|музык/.test(lower)) return "🎬";
-  if (/инвест|акци|облиг|крипт/.test(lower)) return "📈";
-  if (parsed?.type === "income") return "💰";
-  return "🧾";
-}
+function extractLabel(text, parsed) {
+  let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
+  lower = lower.replace(/[\u00a0\u202f]/g, " ");
 
-function shortLabel(text, parsed) {
-  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
-  if (/кофе|кафе/.test(lower)) return "кофе";
-  if (parsed?.category) return parsed.category.toLowerCase();
-  return "операция";
+  const amountWords = [
+    "ноль",
+    "один",
+    "одна",
+    "одно",
+    "два",
+    "две",
+    "три",
+    "четыре",
+    "пять",
+    "шесть",
+    "семь",
+    "восемь",
+    "девять",
+    "десять",
+    "одиннадцать",
+    "двенадцать",
+    "тринадцать",
+    "четырнадцать",
+    "пятнадцать",
+    "шестнадцать",
+    "семнадцать",
+    "восемнадцать",
+    "девятнадцать",
+    "двадцать",
+    "тридцать",
+    "сорок",
+    "пятьдесят",
+    "шестьдесят",
+    "семьдесят",
+    "восемьдесят",
+    "девяносто",
+    "сто",
+    "двести",
+    "триста",
+    "четыреста",
+    "пятьсот",
+    "шестьсот",
+    "семьсот",
+    "восемьсот",
+    "девятьсот",
+    "тысяча",
+    "тысячи",
+    "тысяч",
+    "тыща",
+    "тыщи",
+    "тыщ",
+    "косарь",
+    "косаря",
+    "косарей",
+    "миллион",
+    "миллиона",
+    "миллионов",
+    "мульон",
+    "мульен",
+    "мульенов",
+    "мильон",
+    "мильен",
+    "лимон",
+  ];
+
+  const stopWords = [
+    "на",
+    "за",
+    "в",
+    "во",
+    "с",
+    "со",
+    "из",
+    "по",
+    "к",
+    "от",
+    "для",
+    "это",
+    "мне",
+    "мой",
+    "моя",
+    "мое",
+    "мою",
+    "руб",
+    "рубль",
+    "рубля",
+    "рублей",
+    "р",
+    "карта",
+    "карты",
+    "карте",
+    "картой",
+    "кошелек",
+    "кошелька",
+    "кошельке",
+    "наличные",
+    "наличка",
+    "налом",
+    "кэш",
+    "кеш",
+    "с",
+    "по",
+    "на",
+  ];
+
+  lower = lower.replace(
+    /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/gi,
+    " "
+  );
+  lower = lower.replace(/\d+/g, " ");
+  lower = lower.replace(new RegExp(`\\b(${amountWords.join("|")})\\b`, "gi"), " ");
+  lower = lower.replace(new RegExp(`\\b(${stopWords.join("|")})\\b`, "gi"), " ");
+  lower = lower.replace(/\s+/g, " ").trim();
+
+  if (!lower) {
+    return parsed?.category ? parsed.category : "Операция";
+  }
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 function tokenizeWords(text) {
@@ -336,8 +436,15 @@ function parseOperation(text) {
   }
 
   let account = "Кошелек";
-  if (/(карта|с карты|по карте|на карту)/.test(lower)) account = "Карта";
-  if (/(налич|кошел)/.test(lower)) account = "Кошелек";
+  let accountSpecified = false;
+  if (/(карта|с карты|по карте|на карту)/.test(lower)) {
+    account = "Карта";
+    accountSpecified = true;
+  }
+  if (/(налич|кошел|налом|кеш|кэш)/.test(lower)) {
+    account = "Кошелек";
+    accountSpecified = true;
+  }
 
   return {
     id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -346,6 +453,7 @@ function parseOperation(text) {
     amount,
     category,
     account,
+    accountSpecified,
     createdAt: new Date().toISOString(),
   };
 }
@@ -396,6 +504,47 @@ app.post("/telegram/webhook", (req, res) => {
   const update = req.body || {};
   setImmediate(async () => {
     try {
+      if (update.callback_query) {
+        const cq = update.callback_query;
+        const chatId = cq.message?.chat?.id;
+        const data = cq.data || "";
+        if (!chatId) return;
+
+        if (data.startsWith("account:")) {
+          const account = data.replace("account:", "").trim();
+          const pending = pendingOperations.get(chatId);
+          if (!pending) {
+            await telegramApi("answerCallbackQuery", {
+              callback_query_id: cq.id,
+              text: "Операция не найдена. Отправь сообщение еще раз.",
+              show_alert: true,
+            });
+            return;
+          }
+
+          pending.parsed.account = account;
+          pending.parsed.accountSpecified = true;
+          operations.unshift(pending.parsed);
+          const label = pending.label;
+          const typeLabel = pending.parsed.type === "income" ? "Куда" : "Откуда";
+          const messageText =
+            `${label}\n` +
+            `${formatAmount(pending.parsed.amount)}\n` +
+            `${typeLabel}: ${pending.parsed.account}\n` +
+            `Категория: ${pending.parsed.category}`;
+
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: messageText,
+          });
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          pendingOperations.delete(chatId);
+        }
+        return;
+      }
+
       const message = update.message || update.edited_message;
       if (!message) return;
 
@@ -426,17 +575,38 @@ app.post("/telegram/webhook", (req, res) => {
         return;
       }
 
+      const label = extractLabel(text, parsed);
+      if (!parsed.accountSpecified) {
+        pendingOperations.set(chatId, { parsed, label, text });
+        const prompt =
+          parsed.type === "income"
+            ? "Уточни, куда зачислить:"
+            : "Уточни, с какого счета списать:";
+        await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text: prompt,
+          reply_markup: {
+            inline_keyboard: [
+              accounts.map((acc) => ({
+                text: acc,
+                callback_data: `account:${acc}`,
+              })),
+            ],
+          },
+        });
+        return;
+      }
+
       operations.unshift(parsed);
-      const typeLabel = parsed.type === "income" ? "Доход" : "Расход";
-      const emoji = pickEmoji(text, parsed);
-      const label = shortLabel(text, parsed);
-      const amountText = formatAmount(parsed.amount);
+      const typeLabel = parsed.type === "income" ? "Куда" : "Откуда";
+      const messageText =
+        `${label}\n` +
+        `${formatAmount(parsed.amount)}\n` +
+        `${typeLabel}: ${parsed.account}\n` +
+        `Категория: ${parsed.category}`;
       await telegramApi("sendMessage", {
         chat_id: chatId,
-        text:
-          `${emoji} ${amountText} ${label}\n` +
-          `${typeLabel} · ${parsed.account}\n` +
-          `Текст: ${text}`,
+        text: messageText,
       });
     } catch (err) {
       console.error("Telegram webhook error:", err?.message || err);
