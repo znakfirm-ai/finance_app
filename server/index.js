@@ -75,6 +75,7 @@ async function initDb() {
       category text NOT NULL,
       account text NOT NULL,
       account_specified boolean NOT NULL DEFAULT false,
+      telegram_user_id text,
       created_at timestamptz NOT NULL,
       label text,
       label_emoji text,
@@ -82,6 +83,12 @@ async function initDb() {
       flow_line text
     );
   `);
+  await dbPool.query(
+    "ALTER TABLE operations ADD COLUMN IF NOT EXISTS telegram_user_id text;"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS operations_telegram_user_id_idx ON operations(telegram_user_id);"
+  );
 }
 
 async function saveOperation(operation) {
@@ -92,9 +99,9 @@ async function saveOperation(operation) {
   const query = `
     INSERT INTO operations (
       id, text, type, amount, category, account, account_specified,
-      created_at, label, label_emoji, amount_text, flow_line
+      telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
     )
   `;
   const values = [
@@ -105,6 +112,7 @@ async function saveOperation(operation) {
     operation.category,
     operation.account,
     operation.accountSpecified,
+    operation.telegramUserId || null,
     operation.createdAt,
     operation.label,
     operation.labelEmoji,
@@ -115,18 +123,26 @@ async function saveOperation(operation) {
   return operation;
 }
 
-async function listOperations(limit = 100) {
-  if (!dbPool) return memoryOperations.slice(0, limit);
-  const { rows } = await dbPool.query(
-    `
-      SELECT id, text, type, amount, category, account, account_specified,
-             created_at, label, label_emoji, amount_text, flow_line
-      FROM operations
-      ORDER BY created_at DESC
-      LIMIT $1
-    `,
-    [limit]
-  );
+async function listOperations(limit = 100, telegramUserId = null) {
+  if (!dbPool) {
+    const data = telegramUserId
+      ? memoryOperations.filter((op) => String(op.telegramUserId) === String(telegramUserId))
+      : memoryOperations;
+    return data.slice(0, limit);
+  }
+  let query = `
+    SELECT id, text, type, amount, category, account, account_specified,
+           telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
+    FROM operations
+  `;
+  const params = [];
+  if (telegramUserId) {
+    params.push(String(telegramUserId));
+    query += ` WHERE telegram_user_id = $${params.length}`;
+  }
+  params.push(limit);
+  query += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+  const { rows } = await dbPool.query(query, params);
   return rows.map((row) => ({
     id: row.id,
     text: row.text,
@@ -135,6 +151,7 @@ async function listOperations(limit = 100) {
     category: row.category,
     account: row.account,
     accountSpecified: row.account_specified,
+    telegramUserId: row.telegram_user_id,
     createdAt: row.created_at,
     label: row.label,
     labelEmoji: row.label_emoji,
@@ -822,6 +839,10 @@ app.post("/api/operations", async (req, res) => {
   if (!parsed) {
     return res.status(400).json({ error: "Could not parse operation" });
   }
+  const telegramUserId = req.body?.telegramUserId || null;
+  if (telegramUserId) {
+    parsed.telegramUserId = String(telegramUserId);
+  }
   Object.assign(parsed, buildDisplayFields(text, parsed));
   try {
     await saveOperation(parsed);
@@ -864,6 +885,9 @@ app.post("/telegram/webhook", (req, res) => {
 
           pending.parsed.account = account;
           pending.parsed.accountSpecified = true;
+          if (!pending.parsed.telegramUserId && cq.from?.id) {
+            pending.parsed.telegramUserId = String(cq.from.id);
+          }
           Object.assign(pending.parsed, buildDisplayFields(pending.text, pending.parsed));
           try {
             await saveOperation(pending.parsed);
@@ -893,6 +917,7 @@ app.post("/telegram/webhook", (req, res) => {
 
       const chatId = message.chat?.id;
       if (!chatId) return;
+      const telegramUserId = message.from?.id ? String(message.from.id) : null;
 
       let text = "";
       if (message.text) {
@@ -916,6 +941,9 @@ app.post("/telegram/webhook", (req, res) => {
           text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
         });
         return;
+      }
+      if (telegramUserId) {
+        parsed.telegramUserId = telegramUserId;
       }
 
       const label = extractLabel(text, parsed);
@@ -963,7 +991,9 @@ app.post("/telegram/webhook", (req, res) => {
 
 app.get("/api/operations", async (req, res) => {
   try {
-    const data = await listOperations(200);
+    const telegramUserId =
+      req.query.telegramUserId || req.query.userId || req.query.user_id || null;
+    const data = await listOperations(200, telegramUserId);
     res.json(data);
   } catch (err) {
     console.error("Load operations failed:", err?.message || err);
