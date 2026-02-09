@@ -407,8 +407,11 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
-  padding: 4px 2px;
+  padding: 16px 18px;
   margin-top: auto;
+  background: #ffffff;
+  border-radius: 28px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
 }
 
 .quick-card {
@@ -425,6 +428,7 @@
   font-weight: 600;
   cursor: pointer;
   box-shadow: none;
+  position: relative;
 }
 
 .quick-icon {
@@ -444,6 +448,28 @@
 
 .quick-card.active .quick-icon {
   background: rgba(37, 99, 235, 0.2);
+}
+
+.quick-card.add {
+  transform: translateY(-10px);
+}
+
+.quick-card.add .quick-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 22px;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.35);
+}
+
+.quick-card.add span:last-child {
+  font-weight: 700;
+}
+
+.quick-card.add.active .quick-icon {
+  background: #1d4ed8;
 }
 
 @media (max-width: 640px) {

@@ -590,7 +590,7 @@ function App() {
               <span>Обзор</span>
             </button>
             <button
-              className={quickActive.add ? "quick-card active" : "quick-card"}
+              className={quickActive.add ? "quick-card add active" : "quick-card add"}
               onClick={() => {
                 setView("categories");
               }}
