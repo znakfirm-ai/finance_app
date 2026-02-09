@@ -301,6 +301,17 @@ function extractLabel(text, parsed) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+function buildDisplayFields(text, parsed) {
+  const label = extractLabel(text, parsed);
+  const labelEmoji = pickLabelEmoji(text);
+  const amountText = formatAmount(parsed.amount);
+  const flowLine =
+    parsed.type === "income"
+      ? `📉 Доход: ${parsed.account}`
+      : `📈 Расход: ${parsed.account}`;
+  return { label, labelEmoji, amountText, flowLine };
+}
+
 function tokenizeWords(text) {
   return String(text || "")
     .toLowerCase()
@@ -671,6 +682,7 @@ app.post("/api/operations", (req, res) => {
   if (!parsed) {
     return res.status(400).json({ error: "Could not parse operation" });
   }
+  Object.assign(parsed, buildDisplayFields(text, parsed));
   operations.unshift(parsed);
   res.json(parsed);
 });
@@ -707,18 +719,12 @@ app.post("/telegram/webhook", (req, res) => {
 
           pending.parsed.account = account;
           pending.parsed.accountSpecified = true;
+          Object.assign(pending.parsed, buildDisplayFields(pending.text, pending.parsed));
           operations.unshift(pending.parsed);
-          const label = pending.label;
-          const labelEmoji = pickLabelEmoji(pending.text);
-          const amountText = formatAmount(pending.parsed.amount);
-          const flowLine =
-            pending.parsed.type === "income"
-              ? `📉 Доход: ${pending.parsed.account}`
-              : `📈 Расход: ${pending.parsed.account}`;
           const messageText =
-            `${labelEmoji} ${label}\n` +
-            `💸 ${amountText}\n` +
-            `${flowLine}\n` +
+            `${pending.parsed.labelEmoji} ${pending.parsed.label}\n` +
+            `💸 ${pending.parsed.amountText}\n` +
+            `${pending.parsed.flowLine}\n` +
             `🗂️ Категория: ${pending.parsed.category}`;
 
           await telegramApi("sendMessage", {
@@ -785,17 +791,12 @@ app.post("/telegram/webhook", (req, res) => {
         return;
       }
 
+      Object.assign(parsed, buildDisplayFields(text, parsed));
       operations.unshift(parsed);
-      const labelEmoji = pickLabelEmoji(text);
-      const amountText = formatAmount(parsed.amount);
-      const flowLine =
-        parsed.type === "income"
-          ? `📉 Доход: ${parsed.account}`
-          : `📈 Расход: ${parsed.account}`;
       const messageText =
-        `${labelEmoji} ${label}\n` +
-        `💸 ${amountText}\n` +
-        `${flowLine}\n` +
+        `${parsed.labelEmoji} ${label}\n` +
+        `💸 ${parsed.amountText}\n` +
+        `${parsed.flowLine}\n` +
         `🗂️ Категория: ${parsed.category}`;
       await telegramApi("sendMessage", {
         chat_id: chatId,

@@ -148,16 +148,29 @@ function App() {
           <ul className="list">
             {operations.map((op) => (
               <li key={op.id} className="list-item">
-                <div className="main">
-                  <div className="title">{op.text}</div>
-                  <div className="meta">
-                    {op.category} · {op.account}
+                {op.label && op.amountText && op.flowLine ? (
+                  <div className="main">
+                    <div className="line">
+                      <span className="emoji">{op.labelEmoji || "🧾"}</span> {op.label}
+                    </div>
+                    <div className="line">💸 {op.amountText}</div>
+                    <div className="line">{op.flowLine}</div>
+                    <div className="line">🗂️ Категория: {op.category}</div>
                   </div>
-                </div>
-                <div className={op.type === "income" ? "amount income" : "amount expense"}>
-                  {op.type === "income" ? "+" : "-"}
-                  {op.amount}
-                </div>
+                ) : (
+                  <>
+                    <div className="main">
+                      <div className="title">{op.text}</div>
+                      <div className="meta">
+                        {op.category} · {op.account}
+                      </div>
+                    </div>
+                    <div className={op.type === "income" ? "amount income" : "amount expense"}>
+                      {op.type === "income" ? "+" : "-"}
+                      {op.amount}
+                    </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>

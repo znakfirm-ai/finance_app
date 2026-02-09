@@ -120,6 +120,15 @@
   gap: 4px;
 }
 
+.line {
+  font-size: 14px;
+  color: #111827;
+}
+
+.emoji {
+  margin-right: 4px;
+}
+
 .title {
   font-weight: 600;
   font-size: 14px;
