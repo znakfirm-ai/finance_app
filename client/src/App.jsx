@@ -11,6 +11,10 @@ function App() {
   const [accounts, setAccounts] = useState([]);
   const [currencyOptions, setCurrencyOptions] = useState([]);
   const [settings, setSettings] = useState({ currencyCode: "RUB", currencySymbol: "₽" });
+  const [historyFilter, setHistoryFilter] = useState({
+    type: "all",
+    category: null,
+  });
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [entryText, setEntryText] = useState("");
   const [selectedAccount, setSelectedAccount] = useState("");
@@ -263,6 +267,14 @@ function App() {
     };
   }, [operations]);
 
+  const visibleOperations = useMemo(() => {
+    return operations.filter((op) => {
+      if (historyFilter.type !== "all" && op.type !== historyFilter.type) return false;
+      if (historyFilter.category && op.category !== historyFilter.category) return false;
+      return true;
+    });
+  }, [operations, historyFilter]);
+
   const categoryIcons = {
     Еда: "🍽️",
     Транспорт: "🚌",
@@ -325,11 +337,11 @@ function App() {
       return (
         <section className="card">
           <h2>История</h2>
-          {operations.length === 0 ? (
+          {visibleOperations.length === 0 ? (
             <div className="muted">Пока нет операций</div>
           ) : (
             <ul className="list">
-              {operations.map((op) => (
+              {visibleOperations.map((op) => (
                 <li key={op.id} className="list-item">
                   <div className="main">
                     <div className="line">
@@ -519,6 +531,49 @@ function App() {
               <div className="balance-negative">{formatMoney(summary.expense)}</div>
             </div>
           </div>
+        </section>
+
+        <section className="quick-actions">
+          <button
+            className="quick-card"
+            onClick={() => {
+              setHistoryFilter({ type: "all", category: null });
+              setView("accounts");
+            }}
+          >
+            <span className="quick-icon">💳</span>
+            <span>Все счета</span>
+          </button>
+          <button
+            className="quick-card"
+            onClick={() => {
+              setHistoryFilter({ type: "income", category: null });
+              setView("history");
+            }}
+          >
+            <span className="quick-icon">↗️</span>
+            <span>Доход</span>
+          </button>
+          <button
+            className="quick-card"
+            onClick={() => {
+              setHistoryFilter({ type: "expense", category: null });
+              setView("history");
+            }}
+          >
+            <span className="quick-icon">↘️</span>
+            <span>Расход</span>
+          </button>
+          <button
+            className="quick-card"
+            onClick={() => {
+              setHistoryFilter({ type: "all", category: "Другое" });
+              setView("history");
+            }}
+          >
+            <span className="quick-icon">⋯</span>
+            <span>Другое</span>
+          </button>
         </section>
 
         <section className="card">

@@ -424,6 +424,37 @@
   font-size: 20px;
 }
 
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quick-card {
+  border: none;
+  background: #1f2933;
+  color: #f9fafb;
+  border-radius: 16px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quick-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+}
+
 @media (max-width: 640px) {
   .page {
     padding: 24px 12px 40px;
@@ -440,5 +471,9 @@
 
   .stat-scroll {
     grid-auto-columns: minmax(140px, 1fr);
+  }
+
+  .quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
