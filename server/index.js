@@ -526,7 +526,8 @@ function extractLabel(text, parsed) {
 
   const lemmas = lemmatizeTokens(filtered)
     .filter(Boolean)
-    .map(normalizeLemmaToken);
+    .map(normalizeLemmaToken)
+    .filter((lemma) => !/^коп/i.test(lemma));
   const label = lemmas.join(" ").trim();
   if (!label) {
     const fallback = pickFallbackLabel(text);
