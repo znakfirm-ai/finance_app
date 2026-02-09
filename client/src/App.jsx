@@ -106,6 +106,7 @@ function App() {
   const [newAccountName, setNewAccountName] = useState("");
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [editingAccountName, setEditingAccountName] = useState("");
+  const [showAccountManager, setShowAccountManager] = useState(false);
   const balanceScrollRef = useRef(null);
   const [showBalanceLeft, setShowBalanceLeft] = useState(false);
   const [showBalanceRight, setShowBalanceRight] = useState(false);
@@ -417,6 +418,16 @@ function App() {
     return Object.entries(totals).sort((a, b) => b[1] - a[1]);
   }, [operations]);
 
+  const incomeByCategory = useMemo(() => {
+    const totals = {};
+    operations.forEach((op) => {
+      if (op.type !== "income") return;
+      const key = op.category || "Другое";
+      totals[key] = (totals[key] || 0) + Number(op.amount || 0);
+    });
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  }, [operations]);
+
   const summary = useMemo(() => {
     let income = 0;
     let expense = 0;
@@ -469,6 +480,22 @@ function App() {
     return items;
   }, [accounts, operations, summary]);
 
+  const accountTiles = useMemo(
+    () => accountSummaries.filter((item) => item.key !== "all"),
+    [accountSummaries]
+  );
+
+  const accountTotalsMap = useMemo(() => {
+    const map = new Map();
+    accountTiles.forEach((item) => {
+      map.set(item.label, item.balance);
+    });
+    return map;
+  }, [accountTiles]);
+
+  const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
+  const incomePages = Math.max(1, Math.ceil(incomeByCategory.length / 4));
+
   const updateBalanceArrows = () => {
     const el = balanceScrollRef.current;
     if (!el) return;
@@ -513,6 +540,11 @@ function App() {
     Развлечения: "🎬",
     Другое: "🧾",
   };
+
+  const categoryList =
+    categories.length > 0
+      ? categories.map((c) => c.name)
+      : ["Еда", "Транспорт", "Жильё", "Развлечения", "Другое"];
 
   const formatMoney = (value) => {
     const amount = Number(value || 0);
@@ -600,15 +632,63 @@ function App() {
 
     if (view === "overview") {
       return (
-        <section className="card">
-          <h2>Обзор</h2>
-          <div className="overview-grid">
-            <div className="overview-block">
-              <div className="overview-title">Доходы</div>
-              <div className="muted">Заглушка. Скоро будет статистика.</div>
+        <section className="overview-shell">
+          <div className="overview-header">
+            <button className="overview-profile">
+              default <span className="chevron">▾</span>
+            </button>
+          </div>
+
+          <div className="overview-summary">
+            <div className="summary-item">
+              <div className="summary-label">Расходы</div>
+              <div className="summary-value">{formatMoney(summary.expense)}</div>
             </div>
-            <div className="overview-block accounts-block">
-              <div className="overview-title">Счета</div>
+            <div className="summary-item">
+              <div className="summary-label">Баланс</div>
+              <div className="summary-value">{formatMoney(summary.balance)}</div>
+            </div>
+            <div className="summary-item">
+              <div className="summary-label">Доходы</div>
+              <div className="summary-value">{formatMoney(summary.income)}</div>
+            </div>
+          </div>
+
+          <div className="overview-section">
+            <div className="overview-carousel">
+              {accountTiles.map((acc) => (
+                <button
+                  key={acc.key}
+                  className="overview-tile"
+                  onClick={() => {
+                    setView("overview");
+                    setEditingAccountId(acc.key);
+                    setEditingAccountName(acc.label);
+                    setShowAccountManager(true);
+                  }}
+                >
+                  <div className="overview-icon">💳</div>
+                  <div className="overview-name">{acc.label}</div>
+                  <div className="overview-amount">{formatMoney(acc.balance)}</div>
+                </button>
+              ))}
+              <button
+                className="overview-tile add"
+                onClick={() => setShowAccountManager(true)}
+              >
+                <div className="overview-icon">＋</div>
+                <div className="overview-name">Добавить</div>
+              </button>
+            </div>
+            <div className="overview-dots">
+              {Array.from({ length: accountPages }).map((_, idx) => (
+                <span key={idx} className="dot" />
+              ))}
+            </div>
+          </div>
+
+          {showAccountManager && (
+            <div className="overview-manage">
               <div className="row">
                 <input
                   className="input"
@@ -669,10 +749,41 @@ function App() {
                 ))}
               </ul>
             </div>
-            <div className="overview-block">
-              <div className="overview-title">Расходы</div>
-              <div className="muted">Заглушка. Скоро будет статистика.</div>
+          )}
+
+          {incomeByCategory.length > 0 && (
+            <div className="overview-section">
+              <div className="overview-carousel">
+                {incomeByCategory.slice(0, 8).map(([name, value]) => (
+                  <div key={name} className="overview-tile income">
+                    <div className="overview-icon">💰</div>
+                    <div className="overview-name">{name}</div>
+                    <div className="overview-amount">{formatMoney(value)}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="overview-dots">
+                {Array.from({ length: incomePages }).map((_, idx) => (
+                  <span key={idx} className="dot" />
+                ))}
+              </div>
             </div>
+          )}
+
+          <div className="overview-grid">
+            {categoryList.map((name) => {
+              const total =
+                totalsByCategory.find(([cat]) => cat === name)?.[1] || 0;
+              return (
+                <div key={name} className="overview-category">
+                  <div className="category-badge">
+                    {categoryIcons[name] || "🧾"}
+                  </div>
+                  <div className="category-name">{name}</div>
+                  <div className="category-amount">{formatMoney(total)}</div>
+                </div>
+              );
+            })}
           </div>
           {error && <div className="error">{error}</div>}
         </section>

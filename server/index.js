@@ -1648,13 +1648,26 @@ app.delete("/api/accounts/:id", async (req, res) => {
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
-    const count = await dbPool.query(
-      "SELECT COUNT(*)::int AS count FROM accounts WHERE owner_id = $1",
-      [owner.ownerId]
+    const accountRow = await dbPool.query(
+      "SELECT name FROM accounts WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
     );
-    if (count.rows[0]?.count <= 1) {
+    if (!accountRow.rows.length) {
+      return res.status(404).json({ error: "Account not found" });
+    }
+    const fallback = await dbPool.query(
+      "SELECT name FROM accounts WHERE owner_id = $1 AND id <> $2 ORDER BY created_at ASC LIMIT 1",
+      [owner.ownerId, id]
+    );
+    if (!fallback.rows.length) {
       return res.status(400).json({ error: "Нужен хотя бы один счет" });
     }
+    const oldName = accountRow.rows[0].name;
+    const newName = fallback.rows[0].name;
+    await dbPool.query(
+      "UPDATE operations SET account = $1 WHERE telegram_user_id = $2 AND account = $3",
+      [newName, owner.ownerId, oldName]
+    );
     const result = await dbPool.query(
       "DELETE FROM accounts WHERE id = $1 AND owner_id = $2",
       [id, owner.ownerId]
