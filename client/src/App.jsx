@@ -1,22 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const apiUrl = (path) => `${API_BASE}${path}`;
 
 function App() {
-  const [text, setText] = useState("");
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [view, setView] = useState("home");
   const [operations, setOperations] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [currencyOptions, setCurrencyOptions] = useState([]);
+  const [settings, setSettings] = useState({ currencyCode: "RUB", currencySymbol: "₽" });
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [entryText, setEntryText] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState(null);
   const [webUserId, setWebUserId] = useState(null);
   const [telegramReady, setTelegramReady] = useState(false);
-
-  const recorderRef = useRef(null);
-  const chunksRef = useRef([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState("");
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -38,96 +43,109 @@ function App() {
     setTelegramReady(true);
   }, []);
 
-  useEffect(() => {
-    if (!telegramReady) return;
-    const url = webUserId
-      ? apiUrl(`/api/operations?webUserId=${encodeURIComponent(webUserId)}`)
-      : apiUrl("/api/operations");
-    const headers = initData ? { "x-telegram-init-data": initData } : {};
-    fetch(url, { headers })
-      .then((r) => r.json())
-      .then((data) => setOperations(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  }, [initData, webUserId, telegramReady]);
+  const authHeaders = useMemo(() => {
+    return initData ? { "x-telegram-init-data": initData } : {};
+  }, [initData]);
 
-  async function startRecording() {
-    setError("");
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("Запись голоса недоступна в этом браузере");
-      return;
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-    chunksRef.current = [];
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-
-    recorder.onstop = async () => {
-      setRecording(false);
-      stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-      await transcribe(blob);
-    };
-
-    recorder.start();
-    recorderRef.current = recorder;
-    setRecording(true);
+  function withWebQuery(path) {
+    if (!webUserId) return path;
+    const joiner = path.includes("?") ? "&" : "?";
+    return `${path}${joiner}webUserId=${encodeURIComponent(webUserId)}`;
   }
 
-  function stopRecording() {
-    if (recorderRef.current && recording) {
-      recorderRef.current.stop();
-    }
-  }
-
-  async function transcribe(blob) {
-    setTranscribing(true);
-    setError("");
+  async function loadMeta() {
     try {
-      const formData = new FormData();
-      formData.append("audio", blob, "audio.webm");
-      const res = await fetch(apiUrl("/api/transcribe"), {
-        method: "POST",
-        body: formData,
+      const res = await fetch(apiUrl("/api/meta"));
+      const data = await res.json();
+      setAccounts(Array.isArray(data?.accounts) ? data.accounts : []);
+      setCurrencyOptions(Array.isArray(data?.currencyOptions) ? data.currencyOptions : []);
+    } catch (_) {}
+  }
+
+  async function loadCategories() {
+    try {
+      const res = await fetch(apiUrl(withWebQuery("/api/categories")), {
+        headers: authHeaders,
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Ошибка распознавания");
-      setText(data.text || "");
-    } catch (e) {
-      setError(e.message || "Ошибка распознавания");
-    } finally {
-      setTranscribing(false);
-    }
+      setCategories(Array.isArray(data) ? data : []);
+    } catch (_) {}
   }
 
+  async function loadOperations() {
+    try {
+      const res = await fetch(apiUrl(withWebQuery("/api/operations")), {
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      setOperations(Array.isArray(data) ? data : []);
+    } catch (_) {}
+  }
+
+  async function loadSettings() {
+    try {
+      const res = await fetch(apiUrl(withWebQuery("/api/settings")), {
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      if (data?.currencyCode) {
+        setSettings({
+          currencyCode: data.currencyCode,
+          currencySymbol: data.currencySymbol || "₽",
+        });
+      }
+    } catch (_) {}
+  }
+
+  useEffect(() => {
+    if (!telegramReady) return;
+    loadMeta();
+    loadSettings();
+    loadCategories();
+    loadOperations();
+  }, [telegramReady, initData, webUserId]);
+
+  useEffect(() => {
+    if (!selectedAccount && accounts.length) {
+      setSelectedAccount(accounts[0]);
+    }
+  }, [accounts, selectedAccount]);
+
   async function saveOperation() {
-    const trimmed = text.trim();
+    const trimmed = entryText.trim();
     if (!trimmed) {
       setError("Введите текст операции");
       return;
     }
-    if (!initData && !webUserId) {
-      setError("Не удалось определить пользователя");
+    if (!selectedCategory) {
+      setError("Выберите категорию");
       return;
     }
-
+    if (!selectedAccount) {
+      setError("Выберите счет");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
+      const payload = {
+        text: trimmed,
+        category: selectedCategory.name,
+        account: selectedAccount,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+
       const res = await fetch(apiUrl("/api/operations"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          webUserId ? { text: trimmed, webUserId } : { text: trimmed, initData }
-        ),
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка сохранения");
       setOperations((prev) => [data, ...prev]);
-      setText("");
+      setEntryText("");
+      setView("history");
     } catch (e) {
       setError(e.message || "Ошибка сохранения");
     } finally {
@@ -135,54 +153,150 @@ function App() {
     }
   }
 
-  return (
-    <div className="page">
-      <header className="header">
-        <h1>Личные финансы</h1>
-        <p>Быстрый ввод расходов и доходов голосом или текстом</p>
-      </header>
+  async function createCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    try {
+      const payload = { name };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl("/api/categories"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setCategories((prev) => [...prev, data]);
+      setNewCategoryName("");
+    } catch (e) {
+      setError(e.message || "Ошибка создания категории");
+    }
+  }
 
-      <section className="card">
-        <div className="row">
-          <button
-            className={recording ? "btn danger" : "btn"}
-            onClick={recording ? stopRecording : startRecording}
-            disabled={transcribing}
-          >
-            {recording ? "Остановить запись" : "Записать голос"}
-          </button>
-          <div className="status">
-            {recording && "Идёт запись…"}
-            {transcribing && "Распознавание…"}
+  async function updateCategory(id) {
+    const name = editingName.trim();
+    if (!name) return;
+    try {
+      const payload = { name };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(`/api/categories/${id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setCategories((prev) => prev.map((c) => (c.id === id ? data : c)));
+      setEditingId(null);
+      setEditingName("");
+    } catch (e) {
+      setError(e.message || "Ошибка обновления категории");
+    }
+  }
+
+  async function deleteCategory(id) {
+    if (!confirm("Удалить категорию?")) return;
+    try {
+      const payload = {};
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(withWebQuery(`/api/categories/${id}`)), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+    } catch (e) {
+      setError(e.message || "Ошибка удаления категории");
+    }
+  }
+
+  async function updateCurrency(code) {
+    try {
+      const payload = { currencyCode: code };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl("/api/settings"), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setSettings({
+        currencyCode: data.currencyCode,
+        currencySymbol: data.currencySymbol || "₽",
+      });
+      await loadOperations();
+    } catch (e) {
+      setError(e.message || "Ошибка обновления настроек");
+    }
+  }
+
+  const totalsByCategory = useMemo(() => {
+    const totals = {};
+    operations.forEach((op) => {
+      if (op.type !== "expense") return;
+      const key = op.category || "Другое";
+      totals[key] = (totals[key] || 0) + Number(op.amount || 0);
+    });
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  }, [operations]);
+
+  const content = (() => {
+    if (view === "category" && selectedCategory) {
+      return (
+        <section className="card">
+          <div className="section-title">
+            <button className="link" onClick={() => setView("home")}>
+              ← Назад
+            </button>
+            <h2>{selectedCategory.name}</h2>
           </div>
-        </div>
+          <label className="label">Текст операции</label>
+          <textarea
+            className="input"
+            rows={3}
+            value={entryText}
+            onChange={(e) => setEntryText(e.target.value)}
+            placeholder="Например: 250 кофе"
+          />
+          <label className="label">Счет</label>
+          <div className="chips">
+            {accounts.map((acc) => (
+              <button
+                key={acc}
+                className={acc === selectedAccount ? "chip active" : "chip"}
+                onClick={() => setSelectedAccount(acc)}
+              >
+                {acc}
+              </button>
+            ))}
+          </div>
+          <div className="row">
+            <button className="btn primary" onClick={saveOperation} disabled={saving}>
+              {saving ? "Сохраняю…" : "Сохранить"}
+            </button>
+            {error && <div className="error">{error}</div>}
+          </div>
+        </section>
+      );
+    }
 
-        <label className="label">Текст операции</label>
-        <textarea
-          className="input"
-          rows={3}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder='Например: "потратил 350 на кофе с карты"'
-        />
-
-        <div className="row">
-          <button className="btn primary" onClick={saveOperation} disabled={saving}>
-            {saving ? "Сохраняю…" : "Сохранить операцию"}
-          </button>
-          {error && <div className="error">{error}</div>}
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>История</h2>
-        {operations.length === 0 ? (
-          <div className="muted">Пока нет операций</div>
-        ) : (
-          <ul className="list">
-            {operations.map((op) => (
-              <li key={op.id} className="list-item">
-                {op.label && op.amountText && op.flowLine ? (
+    if (view === "history") {
+      return (
+        <section className="card">
+          <h2>История</h2>
+          {operations.length === 0 ? (
+            <div className="muted">Пока нет операций</div>
+          ) : (
+            <ul className="list">
+              {operations.map((op) => (
+                <li key={op.id} className="list-item">
                   <div className="main">
                     <div className="line">
                       <span className="emoji">{op.labelEmoji || "🧾"}</span> {op.label}
@@ -191,34 +305,183 @@ function App() {
                     <div className="line">{op.flowLine}</div>
                     <div className="line">🗂️ Категория: {op.category}</div>
                   </div>
-                ) : (
-                  <>
-                    <div className="main">
-                      <div className="title">{op.text}</div>
-                      <div className="meta">
-                        {op.category} · {op.account}
-                      </div>
-                    </div>
-                    <div className={op.type === "income" ? "amount income" : "amount expense"}>
-                      {op.type === "income" ? "+" : "-"}
-                      {op.amount}
-                    </div>
-                  </>
-                )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      );
+    }
+
+    if (view === "analytics") {
+      return (
+        <section className="card">
+          <h2>Аналитика</h2>
+          {totalsByCategory.length === 0 ? (
+            <div className="muted">Пока нет данных</div>
+          ) : (
+            <ul className="list compact">
+              {totalsByCategory.map(([name, value]) => (
+                <li key={name} className="analytics-row">
+                  <span>{name}</span>
+                  <strong>
+                    {value.toLocaleString("ru-RU")} {settings.currencySymbol}
+                  </strong>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      );
+    }
+
+    if (view === "accounts") {
+      return (
+        <section className="card">
+          <h2>Счета</h2>
+          <ul className="list compact">
+            {accounts.map((acc) => (
+              <li key={acc} className="analytics-row">
+                <span>{acc}</span>
+                <span className="muted">Баланс позже</span>
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      );
+    }
 
+    if (view === "settings") {
+      return (
+        <section className="card">
+          <h2>Настройки</h2>
+          <div className="settings-block">
+            <label className="label">Валюта</label>
+            <select
+              className="select"
+              value={settings.currencyCode}
+              onChange={(e) => updateCurrency(e.target.value)}
+            >
+              {currencyOptions.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} {c.symbol}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="settings-block">
+            <label className="label">Категории</label>
+            <div className="row">
+              <input
+                className="input"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Новая категория"
+              />
+              <button className="btn" onClick={createCategory}>
+                Добавить
+              </button>
+            </div>
+            <ul className="list compact">
+              {categories.map((cat) => (
+                <li key={cat.id} className="category-row">
+                  {editingId === cat.id ? (
+                    <>
+                      <input
+                        className="input"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                      />
+                      <button className="btn" onClick={() => updateCategory(cat.id)}>
+                        Сохранить
+                      </button>
+                      <button
+                        className="btn ghost"
+                        onClick={() => {
+                          setEditingId(null);
+                          setEditingName("");
+                        }}
+                      >
+                        Отмена
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{cat.name}</span>
+                      <div className="row">
+                        <button
+                          className="btn ghost"
+                          onClick={() => {
+                            setEditingId(cat.id);
+                            setEditingName(cat.name);
+                          }}
+                        >
+                          Редактировать
+                        </button>
+                        <button className="btn danger" onClick={() => deleteCategory(cat.id)}>
+                          Удалить
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+          {error && <div className="error">{error}</div>}
+        </section>
+      );
+    }
+
+    return (
       <section className="card">
-        <h2>Примеры</h2>
-        <ul className="list compact">
-          <li>потратил 350 на еду с карты</li>
-          <li>купила кофе 180 наличными</li>
-          <li>получил 20000 зарплата на карту</li>
-        </ul>
+        <h2>Категории</h2>
+        <div className="category-grid">
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              className="category-card"
+              onClick={() => {
+                setSelectedCategory(cat);
+                setEntryText("");
+                setView("category");
+              }}
+            >
+              {cat.name}
+            </button>
+          ))}
+        </div>
       </section>
+    );
+  })();
+
+  return (
+    <div className="page">
+      <header className="header">
+        <h1>Личные финансы</h1>
+        <p>Выберите категорию и добавьте операцию</p>
+      </header>
+
+      {content}
+
+      <nav className="nav">
+        <button className={view === "home" ? "nav-item active" : "nav-item"} onClick={() => setView("home")}>
+          Категории
+        </button>
+        <button className={view === "history" ? "nav-item active" : "nav-item"} onClick={() => setView("history")}>
+          История
+        </button>
+        <button className={view === "analytics" ? "nav-item active" : "nav-item"} onClick={() => setView("analytics")}>
+          Аналитика
+        </button>
+        <button className={view === "accounts" ? "nav-item active" : "nav-item"} onClick={() => setView("accounts")}>
+          Счета
+        </button>
+        <button className={view === "settings" ? "nav-item active" : "nav-item"} onClick={() => setView("settings")}>
+          Настройки
+        </button>
+      </nav>
     </div>
   );
 }

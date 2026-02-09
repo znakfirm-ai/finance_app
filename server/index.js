@@ -42,7 +42,7 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
-const categories = [
+const defaultCategories = [
   { name: "Еда", keywords: ["еда", "кафе", "кофе", "обед", "ужин", "завтрак", "пицца"] },
   { name: "Транспорт", keywords: ["такси", "метро", "автобус", "бензин", "транспорт"] },
   { name: "Жильё", keywords: ["аренда", "квартира", "коммунал", "жкх", "жилье"] },
@@ -51,6 +51,41 @@ const categories = [
 ];
 
 const accounts = ["Кошелек", "Карта"];
+
+const currencyOptions = [
+  { code: "RUB", symbol: "₽", name: "RUB" },
+  { code: "USD", symbol: "$", name: "USD" },
+  { code: "EUR", symbol: "€", name: "EUR" },
+  { code: "GBP", symbol: "£", name: "GBP" },
+  { code: "JPY", symbol: "¥", name: "JPY" },
+  { code: "CNY", symbol: "¥", name: "CNY" },
+  { code: "CHF", symbol: "CHF", name: "CHF" },
+  { code: "AUD", symbol: "A$", name: "AUD" },
+  { code: "CAD", symbol: "C$", name: "CAD" },
+  { code: "SEK", symbol: "kr", name: "SEK" },
+  { code: "NOK", symbol: "kr", name: "NOK" },
+  { code: "DKK", symbol: "kr", name: "DKK" },
+  { code: "PLN", symbol: "zł", name: "PLN" },
+  { code: "CZK", symbol: "Kč", name: "CZK" },
+  { code: "HUF", symbol: "Ft", name: "HUF" },
+  { code: "TRY", symbol: "₺", name: "TRY" },
+  { code: "INR", symbol: "₹", name: "INR" },
+  { code: "BRL", symbol: "R$", name: "BRL" },
+  { code: "MXN", symbol: "Mex$", name: "MXN" },
+  { code: "KRW", symbol: "₩", name: "KRW" },
+  { code: "SGD", symbol: "S$", name: "SGD" },
+  { code: "HKD", symbol: "HK$", name: "HKD" },
+  { code: "AED", symbol: "AED", name: "AED" },
+  { code: "SAR", symbol: "SAR", name: "SAR" },
+  { code: "ZAR", symbol: "R", name: "ZAR" },
+  { code: "THB", symbol: "฿", name: "THB" },
+  { code: "IDR", symbol: "Rp", name: "IDR" },
+  { code: "MYR", symbol: "RM", name: "MYR" },
+  { code: "PHP", symbol: "₱", name: "PHP" },
+  { code: "VND", symbol: "₫", name: "VND" },
+  { code: "UAH", symbol: "₴", name: "UAH" },
+  { code: "KZT", symbol: "₸", name: "KZT" },
+];
 
 const memoryOperations = [];
 const pendingOperations = new Map();
@@ -107,6 +142,27 @@ async function initDb() {
   );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS operations_telegram_user_id_idx ON operations(telegram_user_id);"
+  );
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      owner_id text PRIMARY KEY,
+      currency_code text NOT NULL DEFAULT 'RUB',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS categories (
+      id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      name text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS categories_owner_id_idx ON categories(owner_id);"
   );
 }
 
@@ -309,6 +365,85 @@ function getOwnerFromRequest(req) {
     return { ownerId: String(webUserId), source: "web" };
   }
   return { ownerId: null, source: null };
+}
+
+function getCurrencySymbol(code) {
+  const entry = currencyOptions.find((c) => c.code === code);
+  return entry?.symbol || "₽";
+}
+
+async function getUserSettings(ownerId) {
+  const defaultSettings = { currencyCode: "RUB" };
+  if (!ownerId || !dbPool) return defaultSettings;
+  const { rows } = await dbPool.query(
+    "SELECT currency_code FROM user_settings WHERE owner_id = $1",
+    [ownerId]
+  );
+  if (rows.length) {
+    return { currencyCode: rows[0].currency_code || "RUB" };
+  }
+  await dbPool.query(
+    "INSERT INTO user_settings (owner_id, currency_code) VALUES ($1, $2)",
+    [ownerId, "RUB"]
+  );
+  return defaultSettings;
+}
+
+async function updateUserSettings(ownerId, currencyCode) {
+  if (!ownerId || !dbPool) return { currencyCode };
+  await dbPool.query(
+    `
+    INSERT INTO user_settings (owner_id, currency_code)
+    VALUES ($1, $2)
+    ON CONFLICT (owner_id) DO UPDATE
+    SET currency_code = EXCLUDED.currency_code, updated_at = now()
+  `,
+    [ownerId, currencyCode]
+  );
+  return { currencyCode };
+}
+
+async function getCategoriesForOwner(ownerId) {
+  if (!ownerId || !dbPool) {
+    return defaultCategories.map((cat, index) => ({
+      id: `cat_default_${index}`,
+      name: cat.name,
+      keywords: cat.keywords,
+    }));
+  }
+  const { rows } = await dbPool.query(
+    "SELECT id, name FROM categories WHERE owner_id = $1 ORDER BY created_at ASC",
+    [ownerId]
+  );
+  if (!rows.length) {
+    const now = Date.now();
+    const values = defaultCategories.map((cat, index) => [
+      `cat_${now}_${index}`,
+      ownerId,
+      cat.name,
+    ]);
+    const placeholders = values
+      .map((_, idx) => `($${idx * 3 + 1}, $${idx * 3 + 2}, $${idx * 3 + 3})`)
+      .join(",");
+    const flat = values.flat();
+    await dbPool.query(
+      `INSERT INTO categories (id, owner_id, name) VALUES ${placeholders}`,
+      flat
+    );
+    return defaultCategories.map((cat, index) => ({
+      id: `cat_${now}_${index}`,
+      name: cat.name,
+      keywords: cat.keywords,
+    }));
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    keywords:
+      row.name === "Другое"
+        ? []
+        : [String(row.name || "").toLowerCase().replace(/ё/g, "е")],
+  }));
 }
 
 async function getTelegramVoiceText(fileId) {
@@ -554,10 +689,10 @@ function pickFallbackLabel(text) {
   return null;
 }
 
-function buildDisplayFields(text, parsed) {
+function buildDisplayFields(text, parsed, currencySymbol = "₽") {
   const label = extractLabel(text, parsed);
   const labelEmoji = pickLabelEmoji(text);
-  const amountText = formatAmount(parsed.amount);
+  const amountText = formatAmount(parsed.amount, currencySymbol);
   const flowLine =
     parsed.type === "income"
       ? `📉 Доход: ${parsed.account}`
@@ -904,7 +1039,7 @@ const expensePatterns = [
   /списан|списали/i,
 ];
 
-function parseOperation(text) {
+function parseOperation(text, categoriesList = defaultCategories) {
   const raw = String(text || "").trim();
   if (!raw) return null;
 
@@ -924,10 +1059,17 @@ function parseOperation(text) {
   }
 
   let category = "Другое";
-  for (const c of categories) {
-    if (c.keywords.some((k) => lower.includes(k))) {
+  for (const c of categoriesList) {
+    if (c.keywords && c.keywords.some((k) => lower.includes(k))) {
       category = c.name;
       break;
+    }
+    if (!c.keywords && c.name && c.name !== "Другое") {
+      const nameLower = String(c.name).toLowerCase().replace(/ё/g, "е");
+      if (nameLower && lower.includes(nameLower)) {
+        category = c.name;
+        break;
+      }
     }
   }
 
@@ -982,11 +1124,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 });
 
 app.post("/api/operations", async (req, res) => {
-  const { text } = req.body || {};
-  const parsed = parseOperation(text);
-  if (!parsed) {
-    return res.status(400).json({ error: "Could not parse operation" });
-  }
+  const { text, category, account } = req.body || {};
   const owner = getOwnerFromRequest(req);
   if (owner?.error) {
     return res.status(401).json({ error: "Invalid Telegram data" });
@@ -994,8 +1132,28 @@ app.post("/api/operations", async (req, res) => {
   if (!owner?.ownerId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  const categoriesList = await getCategoriesForOwner(owner.ownerId);
+  const parsed = parseOperation(text, categoriesList);
+  if (!parsed) {
+    return res.status(400).json({ error: "Could not parse operation" });
+  }
   parsed.telegramUserId = owner.ownerId;
-  Object.assign(parsed, buildDisplayFields(text, parsed));
+  if (category) {
+    const match = categoriesList.find(
+      (c) => String(c.name).toLowerCase() === String(category).toLowerCase()
+    );
+    if (match) parsed.category = match.name;
+  }
+  if (account) {
+    const acc = accounts.find((a) => a === account);
+    if (acc) {
+      parsed.account = acc;
+      parsed.accountSpecified = true;
+    }
+  }
+  const settings = await getUserSettings(owner.ownerId);
+  const currencySymbol = getCurrencySymbol(settings.currencyCode);
+  Object.assign(parsed, buildDisplayFields(text, parsed, currencySymbol));
   try {
     await saveOperation(parsed);
     res.json(parsed);
@@ -1040,7 +1198,14 @@ app.post("/telegram/webhook", (req, res) => {
           if (!pending.parsed.telegramUserId && cq.from?.id) {
             pending.parsed.telegramUserId = String(cq.from.id);
           }
-          Object.assign(pending.parsed, buildDisplayFields(pending.text, pending.parsed));
+          const settings = pending.parsed.telegramUserId
+            ? await getUserSettings(pending.parsed.telegramUserId)
+            : { currencyCode: "RUB" };
+          const currencySymbol = getCurrencySymbol(settings.currencyCode);
+          Object.assign(
+            pending.parsed,
+            buildDisplayFields(pending.text, pending.parsed, currencySymbol)
+          );
           try {
             await saveOperation(pending.parsed);
           } catch (err) {
@@ -1086,7 +1251,10 @@ app.post("/telegram/webhook", (req, res) => {
         return;
       }
 
-      const parsed = parseOperation(text);
+      const categoriesList = telegramUserId
+        ? await getCategoriesForOwner(telegramUserId)
+        : defaultCategories;
+      const parsed = parseOperation(text, categoriesList);
       if (!parsed) {
         await telegramApi("sendMessage", {
           chat_id: chatId,
@@ -1098,9 +1266,13 @@ app.post("/telegram/webhook", (req, res) => {
         parsed.telegramUserId = telegramUserId;
       }
 
+      const settings = telegramUserId
+        ? await getUserSettings(telegramUserId)
+        : { currencyCode: "RUB" };
+      const currencySymbol = getCurrencySymbol(settings.currencyCode);
       const label = extractLabel(text, parsed);
       if (!parsed.accountSpecified) {
-        pendingOperations.set(chatId, { parsed, label, text });
+        pendingOperations.set(chatId, { parsed, label, text, currencySymbol });
         const prompt =
           parsed.type === "income"
             ? "Уточни, куда зачислить:"
@@ -1120,7 +1292,7 @@ app.post("/telegram/webhook", (req, res) => {
         return;
       }
 
-      Object.assign(parsed, buildDisplayFields(text, parsed));
+      Object.assign(parsed, buildDisplayFields(text, parsed, currencySymbol));
       try {
         await saveOperation(parsed);
       } catch (err) {
@@ -1150,18 +1322,176 @@ app.get("/api/operations", async (req, res) => {
     if (!owner?.ownerId) {
       return res.json([]);
     }
+    const settings = await getUserSettings(owner.ownerId);
+    const currencySymbol = getCurrencySymbol(settings.currencyCode);
     const data = await listOperations(200, owner.ownerId);
-    res.json(data);
+    const withCurrency = data.map((op) => ({
+      ...op,
+      amountText: formatAmount(op.amount, currencySymbol),
+    }));
+    res.json(withCurrency);
   } catch (err) {
     console.error("Load operations failed:", err?.message || err);
     res.status(500).json({ error: "Failed to load operations" });
   }
 });
 
+app.get("/api/categories", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const categoriesList = await getCategoriesForOwner(owner.ownerId);
+    res.json(categoriesList.map((c) => ({ id: c.id, name: c.name })));
+  } catch (err) {
+    console.error("Load categories failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load categories" });
+  }
+});
+
+app.post("/api/categories", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const name = String(req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const id = `cat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    await dbPool.query(
+      "INSERT INTO categories (id, owner_id, name) VALUES ($1, $2, $3)",
+      [id, owner.ownerId, name]
+    );
+    res.json({ id, name });
+  } catch (err) {
+    console.error("Create category failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create category" });
+  }
+});
+
+app.put("/api/categories/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const name = String(req.body?.name || "").trim();
+    if (!id || !name) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const result = await dbPool.query(
+      "UPDATE categories SET name = $1 WHERE id = $2 AND owner_id = $3",
+      [name, id, owner.ownerId]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    res.json({ id, name });
+  } catch (err) {
+    console.error("Update category failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update category" });
+  }
+});
+
+app.delete("/api/categories/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const result = await dbPool.query(
+      "DELETE FROM categories WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete category failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete category" });
+  }
+});
+
+app.get("/api/settings", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const settings = await getUserSettings(owner.ownerId);
+    res.json({
+      currencyCode: settings.currencyCode,
+      currencySymbol: getCurrencySymbol(settings.currencyCode),
+    });
+  } catch (err) {
+    console.error("Load settings failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+app.put("/api/settings", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const currencyCode = String(req.body?.currencyCode || "").toUpperCase();
+    const allowed = currencyOptions.some((c) => c.code === currencyCode);
+    if (!allowed) {
+      return res.status(400).json({ error: "Unsupported currency" });
+    }
+    const settings = await updateUserSettings(owner.ownerId, currencyCode);
+    res.json({
+      currencyCode: settings.currencyCode,
+      currencySymbol: getCurrencySymbol(settings.currencyCode),
+    });
+  } catch (err) {
+    console.error("Update settings failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
 app.get("/api/meta", (req, res) => {
   res.json({
-    categories: categories.map((c) => c.name),
     accounts,
+    currencyOptions,
+    defaultCategories: defaultCategories.map((c) => c.name),
   });
 });
 
