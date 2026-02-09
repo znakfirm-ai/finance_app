@@ -11,7 +11,8 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [operations, setOperations] = useState([]);
   const [error, setError] = useState("");
-  const [telegramUserId, setTelegramUserId] = useState(null);
+  const [initData, setInitData] = useState(null);
+  const [webUserId, setWebUserId] = useState(null);
   const [telegramReady, setTelegramReady] = useState(false);
 
   const recorderRef = useRef(null);
@@ -21,24 +22,33 @@ function App() {
     const tg = window.Telegram?.WebApp;
     if (tg) {
       tg.ready();
-      const id = tg.initDataUnsafe?.user?.id;
-      if (id) setTelegramUserId(String(id));
+      if (tg.initData) setInitData(tg.initData);
+    }
+    if (!tg) {
+      const storageKey = "finance_web_user_id";
+      let id = localStorage.getItem(storageKey);
+      if (!id) {
+        id =
+          (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
+          `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        localStorage.setItem(storageKey, id);
+      }
+      setWebUserId(id);
     }
     setTelegramReady(true);
   }, []);
 
   useEffect(() => {
     if (!telegramReady) return;
-    if (!telegramUserId) {
-      setOperations([]);
-      return;
-    }
-    const url = apiUrl(`/api/operations?telegramUserId=${encodeURIComponent(telegramUserId)}`);
-    fetch(url)
+    const url = webUserId
+      ? apiUrl(`/api/operations?webUserId=${encodeURIComponent(webUserId)}`)
+      : apiUrl("/api/operations");
+    const headers = initData ? { "x-telegram-init-data": initData } : {};
+    fetch(url, { headers })
       .then((r) => r.json())
       .then((data) => setOperations(Array.isArray(data) ? data : []))
       .catch(() => {});
-  }, [telegramUserId, telegramReady]);
+  }, [initData, webUserId, telegramReady]);
 
   async function startRecording() {
     setError("");
@@ -99,8 +109,8 @@ function App() {
       setError("Введите текст операции");
       return;
     }
-    if (!telegramUserId) {
-      setError("Открой мини‑апп из Telegram для сохранения операций");
+    if (!initData && !webUserId) {
+      setError("Не удалось определить пользователя");
       return;
     }
 
@@ -110,7 +120,9 @@ function App() {
       const res = await fetch(apiUrl("/api/operations"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: trimmed, telegramUserId }),
+        body: JSON.stringify(
+          webUserId ? { text: trimmed, webUserId } : { text: trimmed, initData }
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка сохранения");

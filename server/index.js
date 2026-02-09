@@ -3,6 +3,7 @@ const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 const { Pool } = require("pg");
 require("dotenv").config();
@@ -18,11 +19,17 @@ const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   : null;
 const LEMMATIZE_SCRIPT = path.join(__dirname, "lemmatize.py");
 const DATABASE_URL = process.env.DATABASE_URL || process.env.RENDER_DATABASE_URL;
+const TELEGRAM_INITDATA_MAX_AGE_SEC = 24 * 60 * 60;
 
 const app = express();
 const port = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    allowedHeaders: ["Content-Type", "x-telegram-init-data"],
+  })
+);
 app.use(express.json());
 
 const uploadDir = path.join(process.env.TMPDIR || "/tmp", "finance_app_uploads");
@@ -71,11 +78,12 @@ async function initDb() {
       id text PRIMARY KEY,
       text text NOT NULL,
       type text NOT NULL,
-      amount integer NOT NULL,
+      amount numeric(12,2) NOT NULL,
       category text NOT NULL,
       account text NOT NULL,
       account_specified boolean NOT NULL DEFAULT false,
       telegram_user_id text,
+      amount_cents integer,
       created_at timestamptz NOT NULL,
       label text,
       label_emoji text,
@@ -83,8 +91,19 @@ async function initDb() {
       flow_line text
     );
   `);
+  try {
+    await dbPool.query(
+      "ALTER TABLE operations ALTER COLUMN amount TYPE numeric(12,2) USING amount::numeric;"
+    );
+  } catch (err) {
+    console.error("Alter amount type failed:", err?.message || err);
+  }
   await dbPool.query(
     "ALTER TABLE operations ADD COLUMN IF NOT EXISTS telegram_user_id text;"
+  );
+  await dbPool.query("ALTER TABLE operations ADD COLUMN IF NOT EXISTS amount_cents integer;");
+  await dbPool.query(
+    "UPDATE operations SET amount_cents = ROUND(amount * 100) WHERE amount_cents IS NULL;"
   );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS operations_telegram_user_id_idx ON operations(telegram_user_id);"
@@ -96,19 +115,26 @@ async function saveOperation(operation) {
     memoryOperations.unshift(operation);
     return operation;
   }
+  const amountValue = Number(operation.amount);
+  const amountCents = Number.isFinite(operation.amountCents)
+    ? operation.amountCents
+    : Number.isFinite(amountValue)
+      ? Math.round(amountValue * 100)
+      : null;
   const query = `
     INSERT INTO operations (
-      id, text, type, amount, category, account, account_specified,
+      id, text, type, amount, amount_cents, category, account, account_specified,
       telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
     )
   `;
   const values = [
     operation.id,
     operation.text,
     operation.type,
-    operation.amount,
+    amountValue,
+    amountCents,
     operation.category,
     operation.account,
     operation.accountSpecified,
@@ -131,7 +157,7 @@ async function listOperations(limit = 100, telegramUserId = null) {
     return data.slice(0, limit);
   }
   let query = `
-    SELECT id, text, type, amount, category, account, account_specified,
+    SELECT id, text, type, amount, amount_cents, category, account, account_specified,
            telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
     FROM operations
   `;
@@ -147,7 +173,14 @@ async function listOperations(limit = 100, telegramUserId = null) {
     id: row.id,
     text: row.text,
     type: row.type,
-    amount: Number(row.amount),
+    amount:
+      row.amount_cents !== null && row.amount_cents !== undefined
+        ? Number(row.amount_cents) / 100
+        : Number(row.amount),
+    amountCents:
+      row.amount_cents !== null && row.amount_cents !== undefined
+        ? Number(row.amount_cents)
+        : Math.round(Number(row.amount) * 100),
     category: row.category,
     account: row.account,
     accountSpecified: row.account_specified,
@@ -203,6 +236,81 @@ async function telegramApi(method, payload) {
   return data.result;
 }
 
+function verifyTelegramInitData(initData) {
+  if (!initData || !process.env.TELEGRAM_BOT_TOKEN) {
+    return { ok: false, error: "Missing init data or bot token" };
+  }
+  let params;
+  try {
+    params = new URLSearchParams(initData);
+  } catch (err) {
+    return { ok: false, error: "Invalid init data format" };
+  }
+  const hash = params.get("hash");
+  if (!hash) return { ok: false, error: "Missing hash" };
+  params.delete("hash");
+  const dataCheckString = Array.from(params.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secretKey = crypto
+    .createHmac("sha256", "WebAppData")
+    .update(process.env.TELEGRAM_BOT_TOKEN)
+    .digest();
+  const computedHash = crypto
+    .createHmac("sha256", secretKey)
+    .update(dataCheckString)
+    .digest("hex");
+  const hashBuffer = Buffer.from(hash, "hex");
+  const computedBuffer = Buffer.from(computedHash, "hex");
+  if (
+    hashBuffer.length !== computedBuffer.length ||
+    !crypto.timingSafeEqual(hashBuffer, computedBuffer)
+  ) {
+    return { ok: false, error: "Hash mismatch" };
+  }
+  const authDate = Number(params.get("auth_date") || 0);
+  if (authDate) {
+    const age = Math.floor(Date.now() / 1000) - authDate;
+    if (age > TELEGRAM_INITDATA_MAX_AGE_SEC) {
+      return { ok: false, error: "Init data expired" };
+    }
+  }
+  let user = null;
+  const userRaw = params.get("user");
+  if (userRaw) {
+    try {
+      user = JSON.parse(userRaw);
+    } catch (err) {
+      return { ok: false, error: "Invalid user data" };
+    }
+  }
+  if (!user?.id) {
+    return { ok: false, error: "Missing user id" };
+  }
+  return { ok: true, userId: String(user.id), user };
+}
+
+function getOwnerFromRequest(req) {
+  const initData =
+    req.header("x-telegram-init-data") ||
+    req.body?.initData ||
+    req.query?.initData ||
+    null;
+  if (initData) {
+    const verified = verifyTelegramInitData(initData);
+    if (!verified.ok) {
+      return { error: verified.error };
+    }
+    return { ownerId: verified.userId, source: "telegram" };
+  }
+  const webUserId = req.body?.webUserId || req.query?.webUserId || null;
+  if (webUserId) {
+    return { ownerId: String(webUserId), source: "web" };
+  }
+  return { ownerId: null, source: null };
+}
+
 async function getTelegramVoiceText(fileId) {
   if (!TELEGRAM_API) throw new Error("TELEGRAM_BOT_TOKEN is missing");
   const file = await telegramApi("getFile", { file_id: fileId });
@@ -215,10 +323,16 @@ async function getTelegramVoiceText(fileId) {
 
 function formatAmount(amount) {
   if (!Number.isFinite(amount)) return String(amount || "");
-  const isInt = Math.abs(amount % 1) < 0.000001;
-  const value = isInt ? Math.round(amount) : amount;
-  const formatted = String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  return `${formatted}₽`;
+  const value = Number(amount);
+  const abs = Math.abs(value);
+  const rubles = Math.trunc(abs);
+  const cents = Math.round((abs - rubles) * 100);
+  const formattedRubles = String(rubles).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const sign = value < 0 ? "-" : "";
+  if (cents > 0) {
+    return `${sign}${formattedRubles},${String(cents).padStart(2, "0")}₽`;
+  }
+  return `${sign}${formattedRubles}₽`;
 }
 
 function lemmatizeTokens(tokens) {
@@ -624,6 +738,32 @@ function parseAmount(text) {
     /(зарплат|зп|аванс|преми|кэшбек|кешбек|доход|поступлен|поступило|перевод|возврат|инвест|вклад|аренд|ипотек|кредит|долг|квартир|дом|машин|авто|ремонт|продаж|покупк|услуг)/i.test(
       lower
     );
+  const kopTokenIndex = tokens.findIndex((token) => /^коп/.test(token));
+  if (kopTokenIndex !== -1) {
+    const rubIndex = tokens.findIndex((token) => /^руб/.test(token) || token === "р");
+    if (rubIndex !== -1 && rubIndex < kopTokenIndex) {
+      const rubTokens = tokens.slice(0, rubIndex).filter((t) => !/^на$/.test(t));
+      const kopTokens = tokens.slice(rubIndex + 1, kopTokenIndex);
+      const rubValue = wordsToNumber(rubTokens);
+      const kopValue = wordsToNumber(kopTokens);
+      if (rubValue && Number.isFinite(kopValue)) {
+        const kop = Math.max(0, Math.min(99, kopValue));
+        return rubValue + kop / 100;
+      }
+    }
+    const rubKopRe =
+      /(\d[\d\s.,]*\d|\d)\s*(?:рубл[яей]?|р|₽)?[^\d]{0,10}(\d{1,2})\s*коп/;
+    const match = lower.match(rubKopRe);
+    if (match) {
+      const rubRaw = match[1].replace(/[\s\u00a0\u202f]/g, "");
+      const rub = Number(rubRaw.replace(/[.,]/g, ""));
+      const kop = Number(match[2]);
+      if (Number.isFinite(rub) && Number.isFinite(kop)) {
+        return rub + Math.max(0, Math.min(99, kop)) / 100;
+      }
+    }
+  }
+
   const strongIncomeHints = /(зарплат|зп|аванс|преми)/i.test(lower);
   if (strongIncomeHints) {
     const quickRe = /(\d[\d\s.,]*\d|\d)/g;
@@ -797,11 +937,14 @@ function parseOperation(text) {
     accountSpecified = true;
   }
 
+  const amountCents = Math.round(amount * 100);
+
   return {
     id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     text: raw,
     type,
     amount,
+    amountCents,
     category,
     account,
     accountSpecified,
@@ -839,10 +982,14 @@ app.post("/api/operations", async (req, res) => {
   if (!parsed) {
     return res.status(400).json({ error: "Could not parse operation" });
   }
-  const telegramUserId = req.body?.telegramUserId || null;
-  if (telegramUserId) {
-    parsed.telegramUserId = String(telegramUserId);
+  const owner = getOwnerFromRequest(req);
+  if (owner?.error) {
+    return res.status(401).json({ error: "Invalid Telegram data" });
   }
+  if (!owner?.ownerId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  parsed.telegramUserId = owner.ownerId;
   Object.assign(parsed, buildDisplayFields(text, parsed));
   try {
     await saveOperation(parsed);
@@ -991,12 +1138,14 @@ app.post("/telegram/webhook", (req, res) => {
 
 app.get("/api/operations", async (req, res) => {
   try {
-    const telegramUserId =
-      req.query.telegramUserId || req.query.userId || req.query.user_id || null;
-    if (!telegramUserId) {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
       return res.json([]);
     }
-    const data = await listOperations(200, telegramUserId);
+    const data = await listOperations(200, owner.ownerId);
     res.json(data);
   } catch (err) {
     console.error("Load operations failed:", err?.message || err);
