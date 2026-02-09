@@ -7,7 +7,8 @@ const { spawnSync } = require("child_process");
 const LEMONFOX_URL = "https://api.lemonfox.ai/v1/audio/transcriptions";
 const TRANSCRIBE_PROMPT =
   "Русский язык. Финансовые операции: зарплата, аванс, премия, кэшбек, перевод, оплата, " +
-  "медклиника, медицина, аптека, коммуналка, еда, транспорт. Пиши естественные русские формы.";
+  "медклиника, медицина, аптека, коммуналка, еда, транспорт. Пиши естественные русские формы. " +
+  "Числа пиши цифрами без пробелов и разделителей (например 2930, 18545).";
 const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
   : null;
@@ -470,6 +471,9 @@ function wordsToNumber(tokens) {
 function parseAmount(text) {
   let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
   lower = lower.replace(/[\u00a0\u202f]/g, " ");
+  const hasScaleWord = /(тыс|тысяч|тыщ|косар|млн|миллион|муль|миль|лимон)/i.test(lower);
+  const spacedMatch = lower.match(/(\d[\d\s.,]*\d)/);
+  const rawSpaced = spacedMatch ? spacedMatch[1] : "";
   let merged = lower;
   let prev = null;
   while (prev !== merged) {
@@ -489,6 +493,15 @@ function parseAmount(text) {
       normalized = rawNumber.replace(",", ".");
     }
     let value = Number(normalized);
+    if (
+      !hasScaleWord &&
+      rawSpaced &&
+      /(\d{1,3}([ .,]\d{3}){1,})$/.test(rawSpaced) &&
+      /\b000$/.test(normalized) &&
+      value >= 1000000
+    ) {
+      value = value / 1000;
+    }
     const suffix = numeric[2] || "";
     if (/^к$/i.test(suffix) || /^тыс/i.test(suffix) || /^тыщ/i.test(suffix) || /^косар/i.test(suffix))
       value *= 1000;
