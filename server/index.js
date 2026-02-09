@@ -542,7 +542,17 @@ function parseAmount(text) {
       if (b.score !== a.score) return b.score - a.score;
       return b.index - a.index;
     });
-    return candidates[0].value;
+    const bestNumeric = candidates[0].value;
+    const wordValue = wordsToNumber(tokenizeWords(lower));
+    if (
+      wordValue &&
+      !hasScaleWord &&
+      bestNumeric >= wordValue * 1000 &&
+      bestNumeric % wordValue === 0
+    ) {
+      return wordValue;
+    }
+    return bestNumeric;
   }
 
   const tokens = tokenizeWords(lower);
