@@ -8,7 +8,8 @@ const LEMONFOX_URL = "https://api.lemonfox.ai/v1/audio/transcriptions";
 const TRANSCRIBE_PROMPT =
   "Русский язык. Финансовые операции: зарплата, аванс, премия, кэшбек, перевод, оплата, " +
   "медклиника, медицина, аптека, коммуналка, еда, транспорт. Пиши естественные русские формы. " +
-  "Числа пиши цифрами без пробелов и разделителей (например 2930, 18545).";
+  "Числа пиши цифрами без пробелов и разделителей (например 2930, 18545). " +
+  "Не добавляй лишние нули к суммам.";
 const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
   : null;
@@ -472,7 +473,9 @@ function wordsToNumber(tokens) {
 function parseAmount(text) {
   let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
   lower = lower.replace(/[\u00a0\u202f]/g, " ");
-  const hasScaleWord = /(тыс|тысяч|тыщ|косар|млн|миллион|муль|миль|лимон)/i.test(lower);
+  const tokens = tokenizeWords(lower);
+  const wordValue = wordsToNumber(tokens);
+  if (wordValue) return wordValue;
 
   const candidateRe =
     /(\d[\d\s.,]*\d|\d)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/gi;
@@ -515,16 +518,6 @@ function parseAmount(text) {
     )
       value *= 1000000;
 
-    if (
-      !hasScaleWord &&
-      !hasSuffix &&
-      /(\d{1,3}([ .,]\d{3}){1,})$/.test(rawNumber) &&
-      /\b000$/.test(normalized) &&
-      value >= 1000000
-    ) {
-      value = value / 1000;
-    }
-
     const digitsCount = compact.replace(/[.,]/g, "").length;
     const context = lower.slice(
       Math.max(0, match.index - 8),
@@ -542,21 +535,10 @@ function parseAmount(text) {
       if (b.score !== a.score) return b.score - a.score;
       return b.index - a.index;
     });
-    const bestNumeric = candidates[0].value;
-    const wordValue = wordsToNumber(tokenizeWords(lower));
-    if (
-      wordValue &&
-      !hasScaleWord &&
-      bestNumeric >= wordValue * 1000 &&
-      bestNumeric % wordValue === 0
-    ) {
-      return wordValue;
-    }
-    return bestNumeric;
+    return candidates[0].value;
   }
 
-  const tokens = tokenizeWords(lower);
-  return wordsToNumber(tokens);
+  return null;
 }
 
 const incomePatterns = [
