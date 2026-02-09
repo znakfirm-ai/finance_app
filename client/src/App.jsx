@@ -211,6 +211,14 @@ function App() {
     }
   }, [accounts, selectedAccount]);
 
+  useEffect(() => {
+    if (view !== "overview") {
+      setAccountEditor(null);
+      setEditingAccountId(null);
+      setEditingAccountName("");
+    }
+  }, [view]);
+
   const currencySymbolByCode = (code) => {
     const entry = currencyOptions.find((c) => c.code === code);
     return entry?.symbol || settings.currencySymbol || "₽";
@@ -814,6 +822,25 @@ function App() {
                   </button>
                 )}
               </div>
+              {accountEditor.mode === "edit" && (
+                <div className="account-preview">
+                  <div
+                    className="account-preview-card"
+                    style={{ background: accountEditor.color || "#0f172a" }}
+                  >
+                    <div className="balance-title">{accountEditor.name}</div>
+                    <div className="balance-value">
+                      {formatMoney(
+                        accountOps.reduce((sum, op) => {
+                          const value = Number(op.amount || 0);
+                          return op.type === "income" ? sum + value : sum - value;
+                        }, 0),
+                        accountCurrencySymbol
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="row">
                 <label className="label">Валюта</label>
                 <select
@@ -928,20 +955,73 @@ function App() {
             </div>
           )}
 
-          <div className="overview-grid">
-            {categoryList.map((name) => {
-              const total =
-                totalsByCategory.find(([cat]) => cat === name)?.[1] || 0;
-              return (
-                <div key={name} className="overview-category">
-                  <div className="category-badge">
-                    {categoryIcons[name] || "🧾"}
+          <div className="overview-categories">
+            <div className="overview-section-header">
+              <div className="overview-subtitle">Категории</div>
+            </div>
+            <div className="row">
+              <input
+                className="input"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Новая категория"
+              />
+              <button className="btn" onClick={createCategory}>
+                Добавить
+              </button>
+            </div>
+            <div className="overview-grid">
+              {categories.map((cat) => {
+                const total =
+                  totalsByCategory.find(([name]) => name === cat.name)?.[1] || 0;
+                return (
+                  <div key={cat.id} className="overview-category">
+                    <div className="category-badge">
+                      {categoryIcons[cat.name] || "🧾"}
+                    </div>
+                    <div className="category-name">{cat.name}</div>
+                    <div className="category-amount">{formatMoney(total)}</div>
+                    <div className="row">
+                      <button
+                        className="btn ghost"
+                        onClick={() => {
+                          setEditingId(cat.id);
+                          setEditingName(cat.name);
+                        }}
+                      >
+                        Ред
+                      </button>
+                      <button className="btn danger" onClick={() => deleteCategory(cat.id)}>
+                        Удалить
+                      </button>
+                    </div>
                   </div>
-                  <div className="category-name">{name}</div>
-                  <div className="category-amount">{formatMoney(total)}</div>
+                );
+              })}
+            </div>
+            {editingId && (
+              <div className="overview-manage">
+                <div className="row">
+                  <input
+                    className="input"
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                  />
+                  <button className="btn" onClick={() => updateCategory(editingId)}>
+                    Сохранить
+                  </button>
+                  <button
+                    className="btn ghost"
+                    onClick={() => {
+                      setEditingId(null);
+                      setEditingName("");
+                    }}
+                  >
+                    Отмена
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
           {error && <div className="error">{error}</div>}
         </section>
@@ -1029,66 +1109,6 @@ function App() {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="settings-block">
-            <label className="label">Категории</label>
-            <div className="row">
-              <input
-                className="input"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="Новая категория"
-              />
-              <button className="btn" onClick={createCategory}>
-                Добавить
-              </button>
-            </div>
-            <ul className="list compact">
-              {categories.map((cat) => (
-                <li key={cat.id} className="category-row">
-                  {editingId === cat.id ? (
-                    <>
-                      <input
-                        className="input"
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                      />
-                      <button className="btn" onClick={() => updateCategory(cat.id)}>
-                        Сохранить
-                      </button>
-                      <button
-                        className="btn ghost"
-                        onClick={() => {
-                          setEditingId(null);
-                          setEditingName("");
-                        }}
-                      >
-                        Отмена
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span>{cat.name}</span>
-                      <div className="row">
-                        <button
-                          className="btn ghost"
-                          onClick={() => {
-                            setEditingId(cat.id);
-                            setEditingName(cat.name);
-                          }}
-                        >
-                          Редактировать
-                        </button>
-                        <button className="btn danger" onClick={() => deleteCategory(cat.id)}>
-                          Удалить
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </li>
-              ))}
-            </ul>
           </div>
           {error && <div className="error">{error}</div>}
         </section>
@@ -1217,6 +1237,9 @@ function App() {
         <button
           className={quickActive.overview ? "quick-card active" : "quick-card"}
           onClick={() => {
+            setAccountEditor(null);
+            setEditingAccountId(null);
+            setEditingAccountName("");
             setView("overview");
           }}
         >

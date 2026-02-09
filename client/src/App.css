@@ -588,6 +588,34 @@
   gap: 10px;
 }
 
+.account-preview {
+  display: flex;
+  justify-content: center;
+}
+
+.account-preview-card {
+  width: min(320px, 90%);
+  border-radius: 16px;
+  padding: 14px;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.overview-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.overview-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .overview-manage-header {
   display: flex;
   align-items: center;
