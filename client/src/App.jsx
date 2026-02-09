@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
@@ -64,6 +64,23 @@ const IconSettings = () => (
   </svg>
 );
 
+const IconChevron = ({ direction = "right" }) => (
+  <svg
+    viewBox="0 0 24 24"
+    className={`balance-chevron ${direction}`}
+    aria-hidden="true"
+  >
+    <path
+      d="M9 5l7 7-7 7"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 function App() {
   const [view, setView] = useState("home");
   const [operations, setOperations] = useState([]);
@@ -86,6 +103,9 @@ function App() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
+  const balanceScrollRef = useRef(null);
+  const [showBalanceLeft, setShowBalanceLeft] = useState(false);
+  const [showBalanceRight, setShowBalanceRight] = useState(false);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -174,6 +194,35 @@ function App() {
       setSelectedAccount(accounts[0]);
     }
   }, [accounts, selectedAccount]);
+
+  const updateBalanceArrows = () => {
+    const el = balanceScrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setShowBalanceLeft(el.scrollLeft > 6);
+    setShowBalanceRight(el.scrollLeft < maxScroll - 6);
+  };
+
+  const scrollBalanceBy = (direction) => {
+    const el = balanceScrollRef.current;
+    if (!el) return;
+    const card = el.querySelector(".balance-card");
+    const offset = card ? card.offsetWidth + 16 : el.clientWidth * 0.8;
+    el.scrollBy({ left: direction * offset, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    if (view !== "home") return;
+    const el = balanceScrollRef.current;
+    if (!el) return;
+    const handleResize = () => updateBalanceArrows();
+    const raf = requestAnimationFrame(updateBalanceArrows);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [view, accountSummaries.length]);
 
   async function saveOperation() {
     const trimmed = entryText.trim();
@@ -644,27 +693,51 @@ function App() {
             </div>
           </section>
 
-          <section className="balance-scroll">
-            {accountSummaries.map((item) => (
-              <div className="balance-card" key={item.key}>
-                <div>
-                  <div className="balance-title">{item.label}</div>
-                  <div className="balance-value">{formatMoney(item.balance)}</div>
-                  <div className="balance-sub">Всего: {formatMoney(item.balance)}</div>
-                </div>
-                <div className="balance-row">
+          <section className="balance-slider">
+            {showBalanceLeft && (
+              <button
+                className="balance-arrow left"
+                aria-label="Прокрутить счета влево"
+                onClick={() => scrollBalanceBy(-1)}
+              >
+                <IconChevron direction="left" />
+              </button>
+            )}
+            {showBalanceRight && (
+              <button
+                className="balance-arrow right"
+                aria-label="Прокрутить счета вправо"
+                onClick={() => scrollBalanceBy(1)}
+              >
+                <IconChevron direction="right" />
+              </button>
+            )}
+            <div
+              className="balance-scroll"
+              ref={balanceScrollRef}
+              onScroll={updateBalanceArrows}
+            >
+              {accountSummaries.map((item) => (
+                <div className="balance-card" key={item.key}>
                   <div>
-                    <div className="balance-label">Доход</div>
-                    <div className="balance-positive">{formatMoney(item.income)}</div>
+                    <div className="balance-title">{item.label}</div>
+                    <div className="balance-value">{formatMoney(item.balance)}</div>
+                    <div className="balance-sub">Всего: {formatMoney(item.balance)}</div>
                   </div>
-                  <div className="balance-divider" />
-                  <div>
-                    <div className="balance-label">Расход</div>
-                    <div className="balance-negative">{formatMoney(item.expense)}</div>
+                  <div className="balance-row">
+                    <div>
+                      <div className="balance-label">Доход</div>
+                      <div className="balance-positive">{formatMoney(item.income)}</div>
+                    </div>
+                    <div className="balance-divider" />
+                    <div>
+                      <div className="balance-label">Расход</div>
+                      <div className="balance-negative">{formatMoney(item.expense)}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </section>
         </div>
       </>

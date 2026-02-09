@@ -362,12 +362,51 @@
   scroll-snap-align: start;
 }
 
+.balance-slider {
+  position: relative;
+}
+
 .balance-scroll {
   display: flex;
   gap: 16px;
   overflow-x: auto;
   padding-bottom: 6px;
   scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.balance-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.balance-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  padding: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.balance-arrow.left {
+  left: 6px;
+}
+
+.balance-arrow.right {
+  right: 6px;
+}
+
+.balance-chevron {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.balance-chevron.left {
+  transform: rotate(180deg);
 }
 
 .balance-title {
