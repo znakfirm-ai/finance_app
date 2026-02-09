@@ -11,23 +11,34 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [operations, setOperations] = useState([]);
   const [error, setError] = useState("");
-  const telegramUserId =
-    typeof window !== "undefined" && window.Telegram?.WebApp?.initDataUnsafe?.user?.id
-      ? String(window.Telegram.WebApp.initDataUnsafe.user.id)
-      : null;
+  const [telegramUserId, setTelegramUserId] = useState(null);
+  const [telegramReady, setTelegramReady] = useState(false);
 
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
 
   useEffect(() => {
-    const url = telegramUserId
-      ? apiUrl(`/api/operations?telegramUserId=${encodeURIComponent(telegramUserId)}`)
-      : apiUrl("/api/operations");
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      const id = tg.initDataUnsafe?.user?.id;
+      if (id) setTelegramUserId(String(id));
+    }
+    setTelegramReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!telegramReady) return;
+    if (!telegramUserId) {
+      setOperations([]);
+      return;
+    }
+    const url = apiUrl(`/api/operations?telegramUserId=${encodeURIComponent(telegramUserId)}`);
     fetch(url)
       .then((r) => r.json())
       .then((data) => setOperations(Array.isArray(data) ? data : []))
       .catch(() => {});
-  }, [telegramUserId]);
+  }, [telegramUserId, telegramReady]);
 
   async function startRecording() {
     setError("");
@@ -88,6 +99,10 @@ function App() {
       setError("Введите текст операции");
       return;
     }
+    if (!telegramUserId) {
+      setError("Открой мини‑апп из Telegram для сохранения операций");
+      return;
+    }
 
     setSaving(true);
     setError("");
@@ -95,9 +110,7 @@ function App() {
       const res = await fetch(apiUrl("/api/operations"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          telegramUserId ? { text: trimmed, telegramUserId } : { text: trimmed }
-        ),
+        body: JSON.stringify({ text: trimmed, telegramUserId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка сохранения");

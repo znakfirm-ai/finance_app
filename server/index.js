@@ -993,6 +993,9 @@ app.get("/api/operations", async (req, res) => {
   try {
     const telegramUserId =
       req.query.telegramUserId || req.query.userId || req.query.user_id || null;
+    if (!telegramUserId) {
+      return res.json([]);
+    }
     const data = await listOperations(200, telegramUserId);
     res.json(data);
   } catch (err) {
