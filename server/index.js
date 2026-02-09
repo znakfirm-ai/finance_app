@@ -115,6 +115,63 @@ function pickLabelEmoji(text) {
   return "🧾";
 }
 
+function normalizeLabelToken(token) {
+  const indeclinable = new Set([
+    "кофе",
+    "метро",
+    "такси",
+    "кино",
+    "радио",
+    "какао",
+    "шоссе",
+  ]);
+  if (!token) return "";
+  if (indeclinable.has(token)) return token;
+  if (token.length < 6) return token;
+
+  const endings = [
+    "ями",
+    "ами",
+    "ого",
+    "его",
+    "ому",
+    "ему",
+    "ыми",
+    "ими",
+    "ах",
+    "ях",
+    "ов",
+    "ев",
+    "ам",
+    "ям",
+    "ой",
+    "ей",
+    "ою",
+    "ею",
+    "ую",
+    "юю",
+    "ая",
+    "яя",
+    "ие",
+    "ые",
+    "ий",
+    "ый",
+    "ой",
+    "а",
+    "у",
+    "е",
+    "ы",
+    "и",
+  ];
+
+  for (const end of endings) {
+    if (token.endsWith(end) && token.length - end.length >= 3) {
+      return token.slice(0, -end.length);
+    }
+  }
+  return token;
+}
+
 function extractLabel(text, parsed) {
   const amountWords = new Set([
     "ноль",
@@ -242,11 +299,14 @@ function extractLabel(text, parsed) {
     if (/^\d/.test(token)) return false;
     if (amountWords.has(token)) return false;
     if (stopWords.has(token)) return false;
+    if (/^налич/i.test(token)) return false;
+    if (/^кошел/i.test(token)) return false;
+    if (/^карт/i.test(token)) return false;
     if (/^(тыс|тыщ|кк|косар|млн|миллион|муль|миль|лимон)/i.test(token)) return false;
     return true;
   });
 
-  const label = filtered.join(" ").trim();
+  const label = filtered.map(normalizeLabelToken).filter(Boolean).join(" ").trim();
   if (!label) {
     return parsed?.category ? parsed.category : "Операция";
   }
