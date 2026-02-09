@@ -102,6 +102,19 @@ function formatAmount(amount) {
   return `${formatted}₽`;
 }
 
+function pickLabelEmoji(text) {
+  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
+  if (/кофе|кафе/.test(lower)) return "☕";
+  if (/аптек|медиц|клин(ик|икa)|стоматолог/.test(lower)) return "💊";
+  if (/такси/.test(lower)) return "🚕";
+  if (/метро|автобус|транспорт|проезд/.test(lower)) return "🚌";
+  if (/еда|обед|ужин|завтрак|пицц/.test(lower)) return "🍽️";
+  if (/жиль|аренд|квартир|коммун|жкх/.test(lower)) return "🏠";
+  if (/кино|игр|развлеч|музык/.test(lower)) return "🎬";
+  if (/инвест|акци|облиг|крипт/.test(lower)) return "📈";
+  return "🧾";
+}
+
 function extractLabel(text, parsed) {
   let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
   lower = lower.replace(/[\u00a0\u202f]/g, " ");
@@ -168,6 +181,23 @@ function extractLabel(text, parsed) {
   ];
 
   const stopWords = [
+    "доход",
+    "расход",
+    "получил",
+    "получила",
+    "получили",
+    "потратил",
+    "потратила",
+    "потратили",
+    "купил",
+    "купила",
+    "купили",
+    "оплатил",
+    "оплатила",
+    "оплатили",
+    "аванс",
+    "зарплата",
+    "премия",
     "на",
     "за",
     "в",
@@ -189,7 +219,9 @@ function extractLabel(text, parsed) {
     "рубль",
     "рубля",
     "рублей",
+    "руб.",
     "р",
+    "р.",
     "карта",
     "карты",
     "карте",
@@ -526,12 +558,17 @@ app.post("/telegram/webhook", (req, res) => {
           pending.parsed.accountSpecified = true;
           operations.unshift(pending.parsed);
           const label = pending.label;
-          const typeLabel = pending.parsed.type === "income" ? "Куда" : "Откуда";
+          const labelEmoji = pickLabelEmoji(pending.text);
+          const amountText = formatAmount(pending.parsed.amount);
+          const flowLine =
+            pending.parsed.type === "income"
+              ? `📉 Доход: ${pending.parsed.account}`
+              : `📈 Расход: ${pending.parsed.account}`;
           const messageText =
-            `${label}\n` +
-            `${formatAmount(pending.parsed.amount)}\n` +
-            `${typeLabel}: ${pending.parsed.account}\n` +
-            `Категория: ${pending.parsed.category}`;
+            `${labelEmoji} ${label}\n` +
+            `💸 ${amountText}\n` +
+            `${flowLine}\n` +
+            `🗂️ Категория: ${pending.parsed.category}`;
 
           await telegramApi("sendMessage", {
             chat_id: chatId,
@@ -598,12 +635,17 @@ app.post("/telegram/webhook", (req, res) => {
       }
 
       operations.unshift(parsed);
-      const typeLabel = parsed.type === "income" ? "Куда" : "Откуда";
+      const labelEmoji = pickLabelEmoji(text);
+      const amountText = formatAmount(parsed.amount);
+      const flowLine =
+        parsed.type === "income"
+          ? `📉 Доход: ${parsed.account}`
+          : `📈 Расход: ${parsed.account}`;
       const messageText =
-        `${label}\n` +
-        `${formatAmount(parsed.amount)}\n` +
-        `${typeLabel}: ${parsed.account}\n` +
-        `Категория: ${parsed.category}`;
+        `${labelEmoji} ${label}\n` +
+        `💸 ${amountText}\n` +
+        `${flowLine}\n` +
+        `🗂️ Категория: ${parsed.category}`;
       await telegramApi("sendMessage", {
         chat_id: chatId,
         text: messageText,
