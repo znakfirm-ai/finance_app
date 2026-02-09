@@ -50,7 +50,7 @@ const defaultCategories = [
   { name: "Другое", keywords: [] },
 ];
 
-const defaultAccounts = ["Кошелек", "Карта"];
+const defaultAccounts = ["Банковская карта", "Наличные"];
 const DEFAULT_ACCOUNT_COLOR = "#0f172a";
 
 const currencyOptions = [
@@ -1190,7 +1190,7 @@ function parseOperation(
         .map((acc) => (typeof acc === "string" ? acc : acc.name))
         .filter(Boolean)
     : defaultAccounts;
-  const defaultAccount = accountNames[0] || "Кошелек";
+  const defaultAccount = accountNames[0] || "Наличные";
   let account = defaultAccount;
   let accountSpecified = false;
   const cardAccount = accountNames.find((name) => /карт/i.test(name));

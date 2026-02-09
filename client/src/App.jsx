@@ -493,7 +493,7 @@ function App() {
       map.set(acc.name, { income: 0, expense: 0 });
     });
     operations.forEach((op) => {
-      const acc = op.account || "Кошелек";
+      const acc = op.account || accounts[0]?.name || "Наличные";
       if (!map.has(acc)) return;
       const bucket = map.get(acc);
       const value = Number(op.amount || 0);
