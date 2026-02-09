@@ -152,6 +152,9 @@ async function initDb() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await dbPool.query(
+    "CREATE UNIQUE INDEX IF NOT EXISTS user_settings_owner_id_unique ON user_settings(owner_id);"
+  );
 
   await dbPool.query(`
     CREATE TABLE IF NOT EXISTS categories (
@@ -376,16 +379,25 @@ async function getUserSettings(ownerId) {
   const defaultSettings = { currencyCode: "RUB" };
   if (!ownerId || !dbPool) return defaultSettings;
   const { rows } = await dbPool.query(
-    "SELECT currency_code FROM user_settings WHERE owner_id = $1",
+    "SELECT currency_code FROM user_settings WHERE owner_id = $1 LIMIT 1",
     [ownerId]
   );
   if (rows.length) {
     return { currencyCode: rows[0].currency_code || "RUB" };
   }
-  await dbPool.query(
-    "INSERT INTO user_settings (owner_id, currency_code) VALUES ($1, $2)",
+  const inserted = await dbPool.query(
+    `
+    INSERT INTO user_settings (owner_id, currency_code)
+    VALUES ($1, $2)
+    ON CONFLICT (owner_id) DO UPDATE
+    SET updated_at = now()
+    RETURNING currency_code
+  `,
     [ownerId, "RUB"]
   );
+  if (inserted.rows.length) {
+    return { currencyCode: inserted.rows[0].currency_code || "RUB" };
+  }
   return defaultSettings;
 }
 
