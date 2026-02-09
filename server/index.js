@@ -474,6 +474,7 @@ function parseAmount(text) {
   let lower = String(text || "").toLowerCase().replace(/ё/g, "е");
   lower = lower.replace(/[\u00a0\u202f]/g, " ");
   const tokens = tokenizeWords(lower);
+  const hasScaleWord = /(тыс|тысяч|тыщ|косар|млн|миллион|муль|миль|лимон)/i.test(lower);
   const wordValue = wordsToNumber(tokens);
   if (wordValue) return wordValue;
 
