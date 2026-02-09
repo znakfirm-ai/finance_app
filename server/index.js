@@ -393,9 +393,28 @@ function extractLabel(text, parsed) {
     .map(normalizeLemmaToken);
   const label = lemmas.join(" ").trim();
   if (!label) {
+    const fallback = pickFallbackLabel(text);
+    if (fallback) return fallback;
     return parsed?.category ? parsed.category : "Операция";
   }
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function pickFallbackLabel(text) {
+  const lower = String(text || "").toLowerCase().replace(/ё/g, "е");
+  const map = [
+    { re: /зарплат/i, label: "Зарплата" },
+    { re: /\bзп\b/i, label: "Зарплата" },
+    { re: /аванс/i, label: "Аванс" },
+    { re: /преми/i, label: "Премия" },
+    { re: /кэшбек|кешбек/i, label: "Кэшбек" },
+    { re: /доход/i, label: "Доход" },
+    { re: /возврат/i, label: "Возврат" },
+  ];
+  for (const item of map) {
+    if (item.re.test(lower)) return item.label;
+  }
+  return null;
 }
 
 function buildDisplayFields(text, parsed) {
