@@ -51,7 +51,8 @@ let dbPool = null;
 function needsSsl(connectionString) {
   if (!connectionString) return false;
   if (/sslmode=require/i.test(connectionString)) return true;
-  return process.env.NODE_ENV === "production" || process.env.PGSSLMODE === "require";
+  if (process.env.PGSSLMODE === "require") return true;
+  return process.env.DATABASE_SSL === "true" || process.env.DATABASE_SSL === "1";
 }
 
 async function initDb() {
