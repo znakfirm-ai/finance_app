@@ -152,9 +152,30 @@ async function initDb() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
-  await dbPool.query(
-    "CREATE UNIQUE INDEX IF NOT EXISTS user_settings_owner_id_unique ON user_settings(owner_id);"
-  );
+  try {
+    await dbPool.query(`
+      WITH ranked AS (
+        SELECT ctid, owner_id,
+               row_number() OVER (
+                 PARTITION BY owner_id
+                 ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+               ) AS rn
+        FROM user_settings
+      )
+      DELETE FROM user_settings u
+      USING ranked r
+      WHERE u.ctid = r.ctid AND r.rn > 1;
+    `);
+  } catch (err) {
+    console.error("User settings dedupe failed:", err?.message || err);
+  }
+  try {
+    await dbPool.query(
+      "CREATE UNIQUE INDEX IF NOT EXISTS user_settings_owner_id_unique ON user_settings(owner_id);"
+    );
+  } catch (err) {
+    console.error("User settings unique index failed:", err?.message || err);
+  }
 
   await dbPool.query(`
     CREATE TABLE IF NOT EXISTS categories (
