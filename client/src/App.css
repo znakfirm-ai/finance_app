@@ -357,7 +357,7 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+  box-shadow: none;
   min-width: min(520px, 82vw);
   flex: 0 0 auto;
   scroll-snap-align: start;
@@ -365,9 +365,8 @@
 
 .balance-slider {
   position: relative;
-  background: #ffffff;
-  border-radius: 20px;
-  padding: 6px 0;
+  background: transparent;
+  padding: 0;
 }
 
 .balance-scroll {
