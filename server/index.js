@@ -7,6 +7,9 @@ const LEMONFOX_URL = "https://api.lemonfox.ai/v1/audio/transcriptions";
 const TRANSCRIBE_PROMPT =
   "Русский язык. Финансовые операции: зарплата, аванс, премия, кэшбек, перевод, оплата, " +
   "медклиника, медицина, аптека, коммуналка, еда, транспорт. Пиши естественные русские формы.";
+const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
+  ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
+  : null;
 require("dotenv").config();
 
 const app = express();
@@ -36,6 +39,59 @@ const categories = [
 const accounts = ["Кошелек", "Карта"];
 
 const operations = [];
+
+async function transcribeBuffer(buffer, filename) {
+  if (!process.env.LEMONFOX_API_KEY) {
+    throw new Error("LEMONFOX_API_KEY is missing");
+  }
+  const form = new FormData();
+  form.append("file", new Blob([buffer]), filename || "audio.webm");
+  form.append("response_format", "json");
+  form.append("language", "ru");
+  form.append("prompt", TRANSCRIBE_PROMPT);
+
+  const response = await fetch(LEMONFOX_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.LEMONFOX_API_KEY}`,
+    },
+    body: form,
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    const message = data?.error || `Lemonfox error ${response.status}`;
+    throw new Error(message);
+  }
+
+  return data.text || "";
+}
+
+async function telegramApi(method, payload) {
+  if (!TELEGRAM_API) {
+    throw new Error("TELEGRAM_BOT_TOKEN is missing");
+  }
+  const res = await fetch(`${TELEGRAM_API}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(data?.description || "Telegram API error");
+  }
+  return data.result;
+}
+
+async function getTelegramVoiceText(fileId) {
+  if (!TELEGRAM_API) throw new Error("TELEGRAM_BOT_TOKEN is missing");
+  const file = await telegramApi("getFile", { file_id: fileId });
+  const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+  const fileRes = await fetch(fileUrl);
+  if (!fileRes.ok) throw new Error("Failed to download voice file");
+  const buffer = Buffer.from(await fileRes.arrayBuffer());
+  return transcribeBuffer(buffer, file.file_path || "voice.ogg");
+}
 
 function tokenizeWords(text) {
   return String(text || "")
@@ -239,33 +295,11 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "Audio file is required" });
   }
-  if (!process.env.LEMONFOX_API_KEY) {
-    return res.status(500).json({ error: "LEMONFOX_API_KEY is missing" });
-  }
 
   try {
     const buffer = await fs.promises.readFile(req.file.path);
-    const form = new FormData();
-    form.append("file", new Blob([buffer]), req.file.originalname || "audio.webm");
-    form.append("response_format", "json");
-    form.append("language", "ru");
-    form.append("prompt", TRANSCRIBE_PROMPT);
-
-    const response = await fetch(LEMONFOX_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.LEMONFOX_API_KEY}`,
-      },
-      body: form,
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      const message = data?.error || `Lemonfox error ${response.status}`;
-      throw new Error(message);
-    }
-
-    res.json({ text: data.text || "" });
+    const text = await transcribeBuffer(buffer, req.file.originalname || "audio.webm");
+    res.json({ text });
   } catch (err) {
     console.error("Transcription failed:", {
       status: err?.status,
@@ -289,6 +323,60 @@ app.post("/api/operations", (req, res) => {
   }
   operations.unshift(parsed);
   res.json(parsed);
+});
+
+app.post("/telegram/webhook", (req, res) => {
+  if (process.env.TELEGRAM_WEBHOOK_SECRET) {
+    const secret = req.header("x-telegram-bot-api-secret-token");
+    if (secret !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+      return res.sendStatus(401);
+    }
+  }
+
+  res.sendStatus(200);
+  const update = req.body || {};
+  setImmediate(async () => {
+    try {
+      const message = update.message || update.edited_message;
+      if (!message) return;
+
+      const chatId = message.chat?.id;
+      if (!chatId) return;
+
+      let text = "";
+      if (message.text) {
+        text = message.text;
+      } else if (message.voice?.file_id) {
+        text = await getTelegramVoiceText(message.voice.file_id);
+      }
+
+      if (!text) {
+        await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text: "Не удалось распознать сообщение. Попробуй еще раз.",
+        });
+        return;
+      }
+
+      const parsed = parseOperation(text);
+      if (!parsed) {
+        await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
+        });
+        return;
+      }
+
+      operations.unshift(parsed);
+      const typeLabel = parsed.type === "income" ? "Доход" : "Расход";
+      await telegramApi("sendMessage", {
+        chat_id: chatId,
+        text: `${typeLabel}: ${parsed.amount}. Категория: ${parsed.category}. Счет: ${parsed.account}.`,
+      });
+    } catch (err) {
+      console.error("Telegram webhook error:", err?.message || err);
+    }
+  });
 });
 
 app.get("/api/operations", (req, res) => {
