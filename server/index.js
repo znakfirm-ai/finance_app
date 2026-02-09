@@ -127,6 +127,7 @@ function lemmatizeTokens(tokens) {
 }
 
 function normalizeLemmaToken(token) {
+  const lower = String(token || "").toLowerCase().replace(/ё/g, "е");
   const map = [
     { re: /^стоматолог/i, lemma: "стоматолог" },
     { re: /^медклиник/i, lemma: "медклиника" },
@@ -135,9 +136,9 @@ function normalizeLemmaToken(token) {
     { re: /^саш/i, lemma: "саша" },
   ];
   for (const item of map) {
-    if (item.re.test(token)) return item.lemma;
+    if (item.re.test(lower)) return item.lemma;
   }
-  return token;
+  return lower || token;
 }
 
 function pickLabelEmoji(text) {
