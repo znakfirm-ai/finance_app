@@ -4,6 +4,8 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { Pool } = require("pg");
+require("dotenv").config();
 const LEMONFOX_URL = "https://api.lemonfox.ai/v1/audio/transcriptions";
 const TRANSCRIBE_PROMPT =
   "Русский язык. Финансовые операции: зарплата, аванс, премия, кэшбек, перевод, оплата, " +
@@ -14,7 +16,7 @@ const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
   : null;
 const LEMMATIZE_SCRIPT = path.join(__dirname, "lemmatize.py");
-require("dotenv").config();
+const DATABASE_URL = process.env.DATABASE_URL || process.env.RENDER_DATABASE_URL;
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -42,8 +44,102 @@ const categories = [
 
 const accounts = ["Кошелек", "Карта"];
 
-const operations = [];
+const memoryOperations = [];
 const pendingOperations = new Map();
+let dbPool = null;
+
+function needsSsl(connectionString) {
+  if (!connectionString) return false;
+  if (/sslmode=require/i.test(connectionString)) return true;
+  return process.env.NODE_ENV === "production" || process.env.PGSSLMODE === "require";
+}
+
+async function initDb() {
+  if (!DATABASE_URL) {
+    console.warn("DATABASE_URL is missing. Using in-memory storage.");
+    return;
+  }
+  const config = { connectionString: DATABASE_URL };
+  if (needsSsl(DATABASE_URL)) {
+    config.ssl = { rejectUnauthorized: false };
+  }
+  dbPool = new Pool(config);
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS operations (
+      id text PRIMARY KEY,
+      text text NOT NULL,
+      type text NOT NULL,
+      amount integer NOT NULL,
+      category text NOT NULL,
+      account text NOT NULL,
+      account_specified boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL,
+      label text,
+      label_emoji text,
+      amount_text text,
+      flow_line text
+    );
+  `);
+}
+
+async function saveOperation(operation) {
+  if (!dbPool) {
+    memoryOperations.unshift(operation);
+    return operation;
+  }
+  const query = `
+    INSERT INTO operations (
+      id, text, type, amount, category, account, account_specified,
+      created_at, label, label_emoji, amount_text, flow_line
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+    )
+  `;
+  const values = [
+    operation.id,
+    operation.text,
+    operation.type,
+    operation.amount,
+    operation.category,
+    operation.account,
+    operation.accountSpecified,
+    operation.createdAt,
+    operation.label,
+    operation.labelEmoji,
+    operation.amountText,
+    operation.flowLine,
+  ];
+  await dbPool.query(query, values);
+  return operation;
+}
+
+async function listOperations(limit = 100) {
+  if (!dbPool) return memoryOperations.slice(0, limit);
+  const { rows } = await dbPool.query(
+    `
+      SELECT id, text, type, amount, category, account, account_specified,
+             created_at, label, label_emoji, amount_text, flow_line
+      FROM operations
+      ORDER BY created_at DESC
+      LIMIT $1
+    `,
+    [limit]
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    text: row.text,
+    type: row.type,
+    amount: Number(row.amount),
+    category: row.category,
+    account: row.account,
+    accountSpecified: row.account_specified,
+    createdAt: row.created_at,
+    label: row.label,
+    labelEmoji: row.label_emoji,
+    amountText: row.amount_text,
+    flowLine: row.flow_line,
+  }));
+}
 
 async function transcribeBuffer(buffer, filename) {
   if (!process.env.LEMONFOX_API_KEY) {
@@ -676,15 +772,20 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
   }
 });
 
-app.post("/api/operations", (req, res) => {
+app.post("/api/operations", async (req, res) => {
   const { text } = req.body || {};
   const parsed = parseOperation(text);
   if (!parsed) {
     return res.status(400).json({ error: "Could not parse operation" });
   }
   Object.assign(parsed, buildDisplayFields(text, parsed));
-  operations.unshift(parsed);
-  res.json(parsed);
+  try {
+    await saveOperation(parsed);
+    res.json(parsed);
+  } catch (err) {
+    console.error("Save operation failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to save operation" });
+  }
 });
 
 app.post("/telegram/webhook", (req, res) => {
@@ -720,7 +821,11 @@ app.post("/telegram/webhook", (req, res) => {
           pending.parsed.account = account;
           pending.parsed.accountSpecified = true;
           Object.assign(pending.parsed, buildDisplayFields(pending.text, pending.parsed));
-          operations.unshift(pending.parsed);
+          try {
+            await saveOperation(pending.parsed);
+          } catch (err) {
+            console.error("Save operation failed:", err?.message || err);
+          }
           const messageText =
             `${pending.parsed.labelEmoji} ${pending.parsed.label}\n` +
             `💸 ${pending.parsed.amountText}\n` +
@@ -792,7 +897,11 @@ app.post("/telegram/webhook", (req, res) => {
       }
 
       Object.assign(parsed, buildDisplayFields(text, parsed));
-      operations.unshift(parsed);
+      try {
+        await saveOperation(parsed);
+      } catch (err) {
+        console.error("Save operation failed:", err?.message || err);
+      }
       const messageText =
         `${parsed.labelEmoji} ${label}\n` +
         `💸 ${parsed.amountText}\n` +
@@ -808,8 +917,14 @@ app.post("/telegram/webhook", (req, res) => {
   });
 });
 
-app.get("/api/operations", (req, res) => {
-  res.json(operations);
+app.get("/api/operations", async (req, res) => {
+  try {
+    const data = await listOperations(200);
+    res.json(data);
+  } catch (err) {
+    console.error("Load operations failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load operations" });
+  }
 });
 
 app.get("/api/meta", (req, res) => {
@@ -819,6 +934,15 @@ app.get("/api/meta", (req, res) => {
   });
 });
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Server running on http://localhost:${port}`);
-});
+initDb()
+  .then(() => {
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error("DB init failed:", err?.message || err);
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${port}`);
+    });
+  });
