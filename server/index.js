@@ -450,7 +450,14 @@ function parseAmount(text) {
     /(\d+[\.,]?\d*)\s*(к|кк|тыс\.?|тысяч[а-я]*|тыщ[а-я]*|косар[а-я]*|млн|миллион[а-я]*|муль[её]н[а-я]*|миль[её]н[а-я]*|лимон[а-я]*)?/i
   );
   if (numeric) {
-    let value = Number(numeric[1].replace(",", "."));
+    const rawNumber = numeric[1];
+    let normalized = rawNumber;
+    if (/^\d{1,3}([.,]\d{3})+$/.test(rawNumber)) {
+      normalized = rawNumber.replace(/[.,]/g, "");
+    } else {
+      normalized = rawNumber.replace(",", ".");
+    }
+    let value = Number(normalized);
     const suffix = numeric[2] || "";
     if (/^к$/i.test(suffix) || /^тыс/i.test(suffix) || /^тыщ/i.test(suffix) || /^косар/i.test(suffix))
       value *= 1000;
