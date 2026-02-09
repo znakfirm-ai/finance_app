@@ -11,16 +11,23 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [operations, setOperations] = useState([]);
   const [error, setError] = useState("");
+  const telegramUserId =
+    typeof window !== "undefined" && window.Telegram?.WebApp?.initDataUnsafe?.user?.id
+      ? String(window.Telegram.WebApp.initDataUnsafe.user.id)
+      : null;
 
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
 
   useEffect(() => {
-    fetch(apiUrl("/api/operations"))
+    const url = telegramUserId
+      ? apiUrl(`/api/operations?telegramUserId=${encodeURIComponent(telegramUserId)}`)
+      : apiUrl("/api/operations");
+    fetch(url)
       .then((r) => r.json())
       .then((data) => setOperations(Array.isArray(data) ? data : []))
       .catch(() => {});
-  }, []);
+  }, [telegramUserId]);
 
   async function startRecording() {
     setError("");
@@ -88,7 +95,9 @@ function App() {
       const res = await fetch(apiUrl("/api/operations"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: trimmed }),
+        body: JSON.stringify(
+          telegramUserId ? { text: trimmed, telegramUserId } : { text: trimmed }
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка сохранения");
