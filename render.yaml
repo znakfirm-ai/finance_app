@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: finance-app-api
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/meta
+    autoDeploy: true
+    envVars:
+      - key: LEMONFOX_API_KEY
+        sync: false
