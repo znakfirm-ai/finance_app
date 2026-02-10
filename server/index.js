@@ -93,6 +93,7 @@ const pendingOperations = new Map();
 const pendingEdits = new Map();
 const pendingEditConfirm = new Map();
 const operationSourceMessages = new Map();
+const onboardingMessages = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
 let dbPool = null;
@@ -516,6 +517,14 @@ async function safeDeleteMessage(chatId, messageId) {
   } catch (err) {
     // ignore delete failures (message might be too old or already deleted)
   }
+}
+
+async function clearOnboardingMessages(chatId) {
+  const info = onboardingMessages.get(chatId);
+  if (!info) return;
+  await safeDeleteMessage(chatId, info.greetingMessageId);
+  await safeDeleteMessage(chatId, info.promptMessageId);
+  onboardingMessages.delete(chatId);
 }
 
 
@@ -1750,9 +1759,14 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
-          await telegramApi("sendMessage", {
+          const promptMessage = await telegramApi("sendMessage", {
             chat_id: chatId,
             text: 'Запиши мне голосовое или отправь текстом "Кофе капучино 200".',
+          });
+          const existing = onboardingMessages.get(chatId) || {};
+          onboardingMessages.set(chatId, {
+            ...existing,
+            promptMessageId: promptMessage?.message_id,
           });
           return;
         }
@@ -1784,16 +1798,23 @@ app.post("/telegram/webhook", (req, res) => {
       }
 
       if (message.text && message.text.trim() === "/start") {
-        await telegramApi("sendMessage", {
+        await clearOnboardingMessages(chatId);
+        const greetingMessage = await telegramApi("sendMessage", {
           chat_id: chatId,
           text: "Привет! Давай устроим порядок в твоих финансах?",
           reply_markup: {
             inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
           },
         });
+        onboardingMessages.set(chatId, {
+          greetingMessageId: greetingMessage?.message_id,
+          promptMessageId: null,
+        });
         await safeDeleteMessage(chatId, message.message_id);
         return;
       }
+
+      await clearOnboardingMessages(chatId);
 
       if (editContext?.opId && editContext?.field) {
         const op = await getEditableOperation(editContext.opId, effectiveOwnerId);
