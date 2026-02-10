@@ -93,7 +93,21 @@ const currencyOptions = [
 
 const memoryOperations = [];
 const pendingOperations = new Map();
+const processedUpdates = new Map();
+const UPDATE_TTL_MS = 5 * 60 * 1000;
 let dbPool = null;
+
+function shouldProcessUpdate(update) {
+  const updateId = update?.update_id;
+  if (updateId == null) return true;
+  const now = Date.now();
+  for (const [id, ts] of processedUpdates.entries()) {
+    if (now - ts > UPDATE_TTL_MS) processedUpdates.delete(id);
+  }
+  if (processedUpdates.has(updateId)) return false;
+  processedUpdates.set(updateId, now);
+  return true;
+}
 
 function needsSsl(connectionString) {
   if (!connectionString) return false;
@@ -1303,6 +1317,7 @@ app.post("/telegram/webhook", (req, res) => {
   const update = req.body || {};
   setImmediate(async () => {
     try {
+      if (!shouldProcessUpdate(update)) return;
       if (update.callback_query) {
         const cq = update.callback_query;
         const chatId = cq.message?.chat?.id;
