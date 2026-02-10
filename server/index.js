@@ -1750,7 +1750,6 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
-          await safeDeleteMessage(chatId, cq.message?.message_id);
           await telegramApi("sendMessage", {
             chat_id: chatId,
             text: 'Запиши мне голосовое или отправь текстом "Кофе капучино 200".',
