@@ -310,6 +310,7 @@ async function listOperations({
   type = null,
   incomeSource = null,
   category = null,
+  search = null,
   before = null,
   from = null,
   to = null,
@@ -329,6 +330,14 @@ async function listOperations({
     }
     if (category) {
       data = data.filter((op) => op.category === category);
+    }
+    if (search) {
+      const q = String(search).toLowerCase();
+      data = data.filter((op) => {
+        const label = String(op.label || op.text || "").toLowerCase();
+        const amount = String(op.amount || op.amountText || "");
+        return label.includes(q) || amount.includes(q);
+      });
     }
     if (from) {
       const fromDate = new Date(from);
@@ -383,6 +392,14 @@ async function listOperations({
   if (category) {
     params.push(category);
     where.push(`category = $${params.length}`);
+  }
+  if (search) {
+    const like = `%${String(search).toLowerCase()}%`;
+    params.push(like);
+    const idx = params.length;
+    where.push(
+      `(LOWER(COALESCE(label, text, '')) LIKE $${idx} OR CAST(amount AS text) LIKE $${idx} OR CAST(amount_cents AS text) LIKE $${idx})`
+    );
   }
   if (from) {
     params.push(from);
@@ -2332,6 +2349,7 @@ app.get("/api/operations", async (req, res) => {
     const account = req.query?.account ? String(req.query.account) : null;
     const type = req.query?.type ? String(req.query.type) : null;
     const category = req.query?.category ? String(req.query.category) : null;
+    const search = req.query?.q ? String(req.query.q) : req.query?.search ? String(req.query.search) : null;
     const incomeSource = req.query?.incomeSource
       ? String(req.query.incomeSource)
       : null;
@@ -2351,6 +2369,7 @@ app.get("/api/operations", async (req, res) => {
       type,
       category,
       incomeSource,
+      search,
       before,
       from,
       to,

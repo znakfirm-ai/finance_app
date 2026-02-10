@@ -123,6 +123,7 @@ function App() {
   const [operationEditor, setOperationEditor] = useState(null);
   const [hideBottomNav, setHideBottomNav] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [historyQueryDebounced, setHistoryQueryDebounced] = useState("");
   const [historyPeriod, setHistoryPeriod] = useState("month");
   const [customRange, setCustomRange] = useState({ from: "", to: "" });
   const [customRangeDraft, setCustomRangeDraft] = useState({ from: "", to: "" });
@@ -229,8 +230,9 @@ function App() {
     if (historyLoading) return;
     setHistoryLoading(true);
     try {
+      const searchQuery = historyQueryDebounced.trim();
       const params = new URLSearchParams();
-      params.set("limit", "50");
+      params.set("limit", searchQuery ? "500" : "50");
       if (accountDetail) {
         params.set("account", accountDetail.name);
       } else if (incomeSourceDetail) {
@@ -239,6 +241,9 @@ function App() {
       } else if (categoryDetail) {
         params.set("type", "expense");
         params.set("category", categoryDetail.name);
+      }
+      if (searchQuery) {
+        params.set("q", searchQuery);
       }
       if (!reset && historyBefore) {
         params.set("before", historyBefore);
@@ -260,7 +265,7 @@ function App() {
       }
       const last = items[items.length - 1];
       setHistoryBefore(last ? last.createdAt || last.created_at || null : null);
-      setHistoryHasMore(items.length === 50);
+      setHistoryHasMore(searchQuery ? false : items.length === 50);
     } catch (_) {
       if (reset) setHistoryItems([]);
       setHistoryHasMore(false);
@@ -358,11 +363,19 @@ function App() {
     setHistoryBefore(null);
     setHistoryHasMore(true);
     setHistoryQuery("");
+    setHistoryQueryDebounced("");
     setHistoryPeriod("month");
     setCustomRange({ from: "", to: "" });
     setCustomRangeDraft({ from: "", to: "" });
     setShowCustomRange(false);
   }, [accountDetail?.id, incomeSourceDetail?.id, categoryDetail?.id, initData, webUserId]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setHistoryQueryDebounced(historyQuery.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [historyQuery]);
 
   useEffect(() => {
     const target = accountDetail || incomeSourceDetail || categoryDetail;
@@ -374,6 +387,7 @@ function App() {
     historyPeriod,
     customRange.from,
     customRange.to,
+    historyQueryDebounced,
     accountDetail?.id,
     incomeSourceDetail?.id,
     categoryDetail?.id,
@@ -1193,16 +1207,8 @@ function App() {
         return opDate >= periodRange.start && opDate <= periodRange.end;
       });
     }
-    const q = historyQuery.trim().toLowerCase();
-    if (q) {
-      items = items.filter((op) => {
-        const label = String(op.label || op.text || "").toLowerCase();
-        const amount = String(op.amount || op.amountText || "");
-        return label.includes(q) || amount.includes(q);
-      });
-    }
     return items;
-  }, [historyItems, historyPeriod, customRange.from, customRange.to, historyQuery]);
+  }, [historyItems, historyPeriod, customRange.from, customRange.to]);
 
   const groupedHistory = useMemo(() => {
     const fmt = new Intl.DateTimeFormat("ru-RU", {
