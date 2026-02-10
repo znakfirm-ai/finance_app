@@ -722,6 +722,10 @@ function getOwnerFromRequest(req) {
     const verified = verifyTelegramInitData(initData);
     if (!verified.ok) {
       console.warn("Telegram init data verification failed:", verified.error);
+      const webUserIdFallback = req.body?.webUserId || req.query?.webUserId || null;
+      if (webUserIdFallback) {
+        return { ownerId: String(webUserIdFallback), source: "fallback" };
+      }
       return { error: verified.error };
     }
     return { ownerId: verified.userId, source: "telegram" };

@@ -142,8 +142,14 @@ function App() {
     if (tg) {
       tg.ready();
       if (tg.initData) setInitData(tg.initData);
+      const tgUserId = tg.initDataUnsafe?.user?.id;
+      if (tgUserId) {
+        setWebUserId(String(tgUserId));
+        setTelegramReady(true);
+        return;
+      }
     }
-    if (!tg || !tg.initData) {
+    if (!tg) {
       const storageKey = "finance_web_user_id";
       let id = localStorage.getItem(storageKey);
       if (!id) {
