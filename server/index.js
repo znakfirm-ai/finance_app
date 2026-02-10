@@ -94,6 +94,7 @@ const currencyOptions = [
 const memoryOperations = [];
 const pendingOperations = new Map();
 const pendingEdits = new Map();
+const pendingEditConfirm = new Map();
 const pendingOnboarding = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
@@ -420,6 +421,43 @@ async function deleteOperationById(operationId, telegramUserId) {
     [operationId, telegramUserId || null]
   );
   return result.rowCount > 0;
+}
+
+async function getEditableOperation(opId, ownerId) {
+  const staged = pendingEditConfirm.get(opId);
+  if (staged && staged.ownerId === ownerId) return staged.op;
+  return getOperationById(opId, ownerId);
+}
+
+async function sendEditPreview(chatId, ownerId, op) {
+  const existing = pendingEditConfirm.get(op.id);
+  if (existing?.previewMessageId) {
+    await safeDeleteMessage(chatId, existing.previewMessageId);
+  }
+  const messageText =
+    `${op.labelEmoji} ${op.label}\n` +
+    `💸 ${op.amountText}\n` +
+    `${op.flowLine}\n` +
+    `🗂️ Категория: ${op.category}`;
+  const previewMessage = await telegramApi("sendMessage", {
+    chat_id: chatId,
+    text: messageText,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✅ Подтвердить", callback_data: `confirm:${op.id}` }],
+        [
+          { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
+          { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
+        ],
+      ],
+    },
+  });
+  pendingEditConfirm.set(op.id, {
+    op,
+    ownerId,
+    chatId,
+    previewMessageId: previewMessage?.message_id,
+  });
 }
 
 async function transcribeBuffer(buffer, filename) {
@@ -1520,12 +1558,48 @@ app.post("/telegram/webhook", (req, res) => {
           });
           return;
         }
+        if (data.startsWith("confirm:")) {
+          const opId = data.replace("confirm:", "").trim();
+          const ownerId = cq.from?.id ? String(cq.from.id) : null;
+          const staged = pendingEditConfirm.get(opId);
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          await safeDeleteMessage(chatId, cq.message?.message_id);
+          if (!staged || staged.ownerId !== ownerId) {
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Не удалось подтвердить операцию.",
+            });
+            return;
+          }
+          await updateOperation(staged.op, ownerId);
+          pendingEditConfirm.delete(opId);
+          const messageText =
+            `${staged.op.labelEmoji} ${staged.op.label}\n` +
+            `💸 ${staged.op.amountText}\n` +
+            `${staged.op.flowLine}\n` +
+            `🗂️ Категория: ${staged.op.category}`;
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: messageText,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✏️ Исправить", callback_data: `edit:${staged.op.id}` },
+                  { text: "🗑️ Удалить", callback_data: `delete:${staged.op.id}` },
+                ],
+              ],
+            },
+          });
+          return;
+        }
         if (data.startsWith("setaccount:")) {
           const parts = data.split(":");
           const opId = parts[1];
           const accountName = parts.slice(2).join(":");
           const ownerId = cq.from?.id ? String(cq.from.id) : null;
-          const op = await getOperationById(opId, ownerId);
+          const op = await getEditableOperation(opId, ownerId);
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
@@ -1542,23 +1616,7 @@ app.post("/telegram/webhook", (req, res) => {
           op.accountSpecified = true;
           op.amountText = formatAmount(op.amount, getCurrencySymbol(settings.currencyCode));
           op.flowLine = op.type === "income" ? `📉 Доход: ${op.account}` : `📈 Расход: ${op.account}`;
-          await updateOperation(op, ownerId);
-          await telegramApi("sendMessage", {
-            chat_id: chatId,
-            text:
-              `${op.labelEmoji} ${op.label}\n` +
-              `💸 ${op.amountText}\n` +
-              `${op.flowLine}\n` +
-              `🗂️ Категория: ${op.category}`,
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
-                  { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
-                ],
-              ],
-            },
-          });
+          await sendEditPreview(chatId, ownerId, op);
           return;
         }
         if (data.startsWith("setcategory:")) {
@@ -1566,7 +1624,7 @@ app.post("/telegram/webhook", (req, res) => {
           const opId = parts[1];
           const categoryName = parts.slice(2).join(":");
           const ownerId = cq.from?.id ? String(cq.from.id) : null;
-          const op = await getOperationById(opId, ownerId);
+          const op = await getEditableOperation(opId, ownerId);
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
@@ -1581,23 +1639,7 @@ app.post("/telegram/webhook", (req, res) => {
           const settings = await getUserSettings(ownerId);
           op.category = categoryName;
           op.amountText = formatAmount(op.amount, getCurrencySymbol(settings.currencyCode));
-          await updateOperation(op, ownerId);
-          await telegramApi("sendMessage", {
-            chat_id: chatId,
-            text:
-              `${op.labelEmoji} ${op.label}\n` +
-              `💸 ${op.amountText}\n` +
-              `${op.flowLine}\n` +
-              `🗂️ Категория: ${op.category}`,
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
-                  { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
-                ],
-              ],
-            },
-          });
+          await sendEditPreview(chatId, ownerId, op);
           return;
         }
         if (data.startsWith("edit:")) {
@@ -1635,6 +1677,7 @@ app.post("/telegram/webhook", (req, res) => {
             callback_query_id: cq.id,
           });
           await safeDeleteMessage(chatId, cq.message?.message_id);
+          pendingEditConfirm.delete(opId);
           await telegramApi("sendMessage", {
             chat_id: chatId,
             text: deleted ? "Удалил операцию." : "Не удалось найти операцию.",
@@ -1768,7 +1811,7 @@ app.post("/telegram/webhook", (req, res) => {
       await clearOnboardingMessages(chatId);
 
       if (editContext?.opId && editContext?.field) {
-        const op = await getOperationById(editContext.opId, effectiveOwnerId);
+        const op = await getEditableOperation(editContext.opId, effectiveOwnerId);
         if (!op) {
           pendingEdits.delete(chatId);
           await telegramApi("sendMessage", {
@@ -1810,25 +1853,10 @@ app.post("/telegram/webhook", (req, res) => {
         op.amountText = formatAmount(op.amount, currencySymbol);
         op.flowLine =
           op.type === "income" ? `📉 Доход: ${op.account}` : `📈 Расход: ${op.account}`;
-        await updateOperation(op, effectiveOwnerId);
         pendingEdits.delete(chatId);
         await safeDeleteMessage(chatId, editContext.promptMessageId);
-        await telegramApi("sendMessage", {
-          chat_id: chatId,
-          text:
-            `${op.labelEmoji} ${op.label}\n` +
-            `💸 ${op.amountText}\n` +
-            `${op.flowLine}\n` +
-            `🗂️ Категория: ${op.category}`,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
-                { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
-              ],
-            ],
-          },
-        });
+        await safeDeleteMessage(chatId, message.message_id);
+        await sendEditPreview(chatId, effectiveOwnerId, op);
         return;
       }
 
