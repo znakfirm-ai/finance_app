@@ -1746,6 +1746,17 @@ app.post("/telegram/webhook", (req, res) => {
           pendingOperations.delete(chatId);
           return;
         }
+        if (data === "onboard:yes") {
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          await safeDeleteMessage(chatId, cq.message?.message_id);
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: 'Запиши мне голосовое или отправь текстом "Кофе капучино 200".',
+          });
+          return;
+        }
         return;
       }
 
@@ -1777,6 +1788,9 @@ app.post("/telegram/webhook", (req, res) => {
         await telegramApi("sendMessage", {
           chat_id: chatId,
           text: "Привет! Давай устроим порядок в твоих финансах?",
+          reply_markup: {
+            inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
+          },
         });
         await safeDeleteMessage(chatId, message.message_id);
         return;
