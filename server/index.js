@@ -1762,15 +1762,18 @@ app.post("/telegram/webhook", (req, res) => {
             callback_query_id: cq.id,
           });
           await safeDeleteMessage(chatId, cq.message?.message_id);
+          const existingOnboarding = pendingOnboarding.get(chatId);
+          if (existingOnboarding?.gifMessageId) {
+            await safeDeleteMessage(chatId, existingOnboarding.gifMessageId);
+          }
           const promptMessage = await telegramApi("sendMessage", {
             chat_id: chatId,
             text:
               "Запиши мне голосовое или отправь текстовое сообщение, например: " +
               '"Кофе 400 рублей, оплата картой".',
           });
-          const existing = pendingOnboarding.get(chatId) || {};
           pendingOnboarding.set(chatId, {
-            ...existing,
+            gifMessageId: null,
             promptMessageId: promptMessage?.message_id,
           });
           return;
