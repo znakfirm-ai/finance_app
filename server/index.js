@@ -309,6 +309,7 @@ async function listOperations({
   account = null,
   type = null,
   incomeSource = null,
+  category = null,
   before = null,
   from = null,
   to = null,
@@ -325,6 +326,9 @@ async function listOperations({
     }
     if (incomeSource) {
       data = data.filter((op) => (op.incomeSource || op.category) === incomeSource);
+    }
+    if (category) {
+      data = data.filter((op) => op.category === category);
     }
     if (from) {
       const fromDate = new Date(from);
@@ -375,6 +379,10 @@ async function listOperations({
     where.push(
       `(income_source = $${params.length - 1} OR (income_source IS NULL AND category = $${params.length}))`
     );
+  }
+  if (category) {
+    params.push(category);
+    where.push(`category = $${params.length}`);
   }
   if (from) {
     params.push(from);
@@ -2319,6 +2327,7 @@ app.get("/api/operations", async (req, res) => {
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200;
     const account = req.query?.account ? String(req.query.account) : null;
     const type = req.query?.type ? String(req.query.type) : null;
+    const category = req.query?.category ? String(req.query.category) : null;
     const incomeSource = req.query?.incomeSource
       ? String(req.query.incomeSource)
       : null;
@@ -2336,6 +2345,7 @@ app.get("/api/operations", async (req, res) => {
       telegramUserId: owner.ownerId,
       account,
       type,
+      category,
       incomeSource,
       before,
       from,
@@ -2582,6 +2592,14 @@ app.put("/api/categories/:id", async (req, res) => {
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
+    const current = await dbPool.query(
+      "SELECT name FROM categories WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!current.rows.length) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    const oldName = current.rows[0].name;
     const result = await dbPool.query(
       "UPDATE categories SET name = $1 WHERE id = $2 AND owner_id = $3",
       [name, id, owner.ownerId]
@@ -2589,6 +2607,10 @@ app.put("/api/categories/:id", async (req, res) => {
     if (!result.rowCount) {
       return res.status(404).json({ error: "Category not found" });
     }
+    await dbPool.query(
+      "UPDATE operations SET category = $1 WHERE telegram_user_id = $2 AND type = 'expense' AND category = $3",
+      [name, owner.ownerId, oldName]
+    );
     res.json({ id, name });
   } catch (err) {
     console.error("Update category failed:", err?.message || err);
@@ -2612,6 +2634,25 @@ app.delete("/api/categories/:id", async (req, res) => {
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
+    const current = await dbPool.query(
+      "SELECT name FROM categories WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!current.rows.length) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+    const fallback = await dbPool.query(
+      "SELECT name FROM categories WHERE owner_id = $1 AND id <> $2 ORDER BY created_at ASC LIMIT 1",
+      [owner.ownerId, id]
+    );
+    if (!fallback.rows.length) {
+      return res.status(400).json({ error: "Cannot delete last category" });
+    }
+    const fallbackName = fallback.rows[0].name;
+    await dbPool.query(
+      "UPDATE operations SET category = $1 WHERE telegram_user_id = $2 AND type = 'expense' AND category = $3",
+      [fallbackName, owner.ownerId, current.rows[0].name]
+    );
     const result = await dbPool.query(
       "DELETE FROM categories WHERE id = $1 AND owner_id = $2",
       [id, owner.ownerId]
@@ -2619,7 +2660,7 @@ app.delete("/api/categories/:id", async (req, res) => {
     if (!result.rowCount) {
       return res.status(404).json({ error: "Category not found" });
     }
-    res.json({ ok: true });
+    res.json({ ok: true, reassignedTo: fallbackName });
   } catch (err) {
     console.error("Delete category failed:", err?.message || err);
     res.status(500).json({ error: "Failed to delete category" });

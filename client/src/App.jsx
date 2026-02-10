@@ -102,8 +102,10 @@ function App() {
   const [webUserId, setWebUserId] = useState(null);
   const [telegramReady, setTelegramReady] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [editingId, setEditingId] = useState(null);
-  const [editingName, setEditingName] = useState("");
+  const [categoryEditor, setCategoryEditor] = useState(null);
+  const [categoryDetail, setCategoryDetail] = useState(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+  const [categorySaveMessage, setCategorySaveMessage] = useState("");
   const [newAccountName, setNewAccountName] = useState("");
   const [newIncomeSourceName, setNewIncomeSourceName] = useState("");
   const [editingAccountId, setEditingAccountId] = useState(null);
@@ -216,7 +218,7 @@ function App() {
   }
 
   async function loadHistory(reset = true) {
-    const target = accountDetail || incomeSourceDetail;
+    const target = accountDetail || incomeSourceDetail || categoryDetail;
     if (!target) return;
     if (historyLoading) return;
     setHistoryLoading(true);
@@ -228,6 +230,9 @@ function App() {
       } else if (incomeSourceDetail) {
         params.set("type", "income");
         params.set("incomeSource", incomeSourceDetail.name);
+      } else if (categoryDetail) {
+        params.set("type", "expense");
+        params.set("category", categoryDetail.name);
       }
       if (!reset && historyBefore) {
         params.set("before", historyBefore);
@@ -333,12 +338,16 @@ function App() {
       setIncomeSourceDetail(null);
       setEditingIncomeSourceName("");
       setNewIncomeSourceName("");
+      setCategoryEditor(null);
+      setCategoryDetail(null);
+      setEditingCategoryName("");
+      setNewCategoryName("");
       setOperationEditor(null);
     }
   }, [view]);
 
   useEffect(() => {
-    const target = accountDetail || incomeSourceDetail;
+    const target = accountDetail || incomeSourceDetail || categoryDetail;
     if (!target) return;
     setHistoryBefore(null);
     setHistoryHasMore(true);
@@ -347,10 +356,10 @@ function App() {
     setCustomRange({ from: "", to: "" });
     setCustomRangeDraft({ from: "", to: "" });
     setShowCustomRange(false);
-  }, [accountDetail?.id, incomeSourceDetail?.id, initData, webUserId]);
+  }, [accountDetail?.id, incomeSourceDetail?.id, categoryDetail?.id, initData, webUserId]);
 
   useEffect(() => {
-    const target = accountDetail || incomeSourceDetail;
+    const target = accountDetail || incomeSourceDetail || categoryDetail;
     if (!target) return;
     setHistoryBefore(null);
     setHistoryHasMore(true);
@@ -361,6 +370,7 @@ function App() {
     customRange.to,
     accountDetail?.id,
     incomeSourceDetail?.id,
+    categoryDetail?.id,
     initData,
     webUserId,
   ]);
@@ -394,6 +404,16 @@ function App() {
     }
     setEditingIncomeSourceName(incomeSourceEditor.name || "");
   }, [incomeSourceEditor?.id, incomeSourceEditor?.mode, incomeSourceEditor?.name]);
+
+  useEffect(() => {
+    if (!categoryEditor) return;
+    if (categoryEditor.mode === "create") {
+      setNewCategoryName("");
+      setEditingCategoryName("");
+      return;
+    }
+    setEditingCategoryName(categoryEditor.name || "");
+  }, [categoryEditor?.id, categoryEditor?.mode, categoryEditor?.name]);
 
   const currencySymbolByCode = (code) => {
     const entry = currencyOptions.find((c) => c.code === code);
@@ -634,13 +654,18 @@ function App() {
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setCategories((prev) => [...prev, data]);
       setNewCategoryName("");
+      setCategoryEditor({ ...data, mode: "edit", originalName: data.name });
+      setEditingCategoryName(data.name || "");
+      setCategorySaveMessage("Категория создана");
+      setTimeout(() => setCategorySaveMessage(""), 2000);
+      await loadOperations();
     } catch (e) {
       setError(e.message || "Ошибка создания категории");
     }
   }
 
   async function updateCategory(id) {
-    const name = editingName.trim();
+    const name = editingCategoryName.trim();
     if (!name) return;
     try {
       const payload = { name };
@@ -654,8 +679,13 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setCategories((prev) => prev.map((c) => (c.id === id ? data : c)));
-      setEditingId(null);
-      setEditingName("");
+      if (categoryDetail?.id === id) {
+        setCategoryDetail({ ...categoryDetail, name: data.name });
+      }
+      setCategoryEditor({ ...data, mode: "edit", originalName: data.name });
+      setCategorySaveMessage("Сохранено");
+      setTimeout(() => setCategorySaveMessage(""), 2000);
+      await loadOperations();
     } catch (e) {
       setError(e.message || "Ошибка обновления категории");
     }
@@ -675,6 +705,13 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setCategories((prev) => prev.filter((c) => c.id !== id));
+      if (categoryDetail?.id === id) {
+        setCategoryDetail(null);
+      }
+      if (categoryEditor?.id === id) {
+        setCategoryEditor(null);
+      }
+      await loadOperations();
     } catch (e) {
       setError(e.message || "Ошибка удаления категории");
     }
@@ -980,6 +1017,17 @@ function App() {
     }));
   }, [incomeSources, operations]);
 
+  const categoryTotals = useMemo(() => {
+    const totals = new Map();
+    categories.forEach((cat) => totals.set(cat.name, 0));
+    totalsByCategory.forEach(([name, value]) => totals.set(name, value));
+    return categories.map((cat) => ({
+      id: cat.id,
+      name: cat.name,
+      total: totals.get(cat.name) || 0,
+    }));
+  }, [categories, totalsByCategory]);
+
   const summary = useMemo(() => {
     const includeMap = new Map();
     accounts.forEach((acc) => {
@@ -1151,6 +1199,7 @@ function App() {
 
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
   const incomePages = Math.max(1, Math.ceil(incomeSourceTotals.length / 4));
+  const categoryPages = Math.max(1, Math.ceil(categoryTotals.length / 4));
 
   const updateBalanceArrows = () => {
     const el = balanceScrollRef.current;
@@ -1716,6 +1765,180 @@ function App() {
         return <section className="overview-shell">{incomeSourceEditorView}</section>;
       }
 
+      const categoryEditorView = categoryEditor ? (
+        <div className="overview-manage">
+          <div className="overview-manage-header">
+            <div className="overview-manage-title">
+              {categoryEditor.mode === "create" ? "Новая категория" : "Категория"}
+            </div>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setCategoryEditor(null);
+                setEditingCategoryName("");
+                setNewCategoryName("");
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+          {categoryEditor.mode === "create" ? (
+            <div className="account-edit-panel">
+              <label className="label">Название категории</label>
+              <input
+                className="input"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder="Например: Еда"
+              />
+              <button className="btn" onClick={createCategory}>
+                Добавить
+              </button>
+            </div>
+          ) : (
+            <div className="account-edit-panel">
+              <label className="label">Название категории</label>
+              <input
+                className="input"
+                value={editingCategoryName}
+                onChange={(e) => setEditingCategoryName(e.target.value)}
+              />
+              <div className="row">
+                <button className="btn" onClick={() => updateCategory(categoryEditor.id)}>
+                  Сохранить
+                </button>
+              </div>
+            </div>
+          )}
+          {categorySaveMessage && (
+            <div className="status success">{categorySaveMessage}</div>
+          )}
+          {categoryEditor.mode === "edit" && (
+            <button
+              className="btn danger"
+              onClick={() => deleteCategory(categoryEditor.id)}
+            >
+              Удалить категорию
+            </button>
+          )}
+        </div>
+      ) : null;
+
+      if (categoryEditorView) {
+        return <section className="overview-shell">{categoryEditorView}</section>;
+      }
+
+      if (categoryDetail) {
+        return (
+          <section className="overview-shell">
+            <div className="overview-manage-header">
+              <div className="overview-manage-title">{categoryDetail.name}</div>
+              <button className="btn ghost" onClick={() => setCategoryDetail(null)}>
+                Закрыть
+              </button>
+            </div>
+            <div className="row">
+              <input
+                className="input"
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Поиск по названию или сумме"
+              />
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setCustomRangeDraft(customRange);
+                  setShowCustomRange(historyPeriod === "custom");
+                  setShowPeriodSheet(true);
+                }}
+              >
+                Период
+              </button>
+            </div>
+            {periodRangeText && (
+              <div className="history-range">{periodRangeText}</div>
+            )}
+            <button
+              className="btn"
+              onClick={() =>
+                setOperationEditor({
+                  mode: "create",
+                  type: "expense",
+                  label: "",
+                  amount: "",
+                  account: accounts[0]?.name || "",
+                  category: categoryDetail.name,
+                  date: formatDateInput(new Date()),
+                })
+              }
+            >
+              Добавить расход
+            </button>
+            <div className="history-list" ref={historyListRef} onScroll={handleHistoryScroll}>
+              {groupedHistory.length === 0 ? (
+                <div className="muted">Пока нет операций</div>
+              ) : (
+                groupedHistory.map((group) => (
+                  <div key={group.key} className="history-group">
+                    <div className="history-date-row">
+                      <div className="history-date">{group.key}</div>
+                      <div className="history-date-total">
+                        {formatMoney(Math.abs(group.total), settings.currencySymbol)}
+                      </div>
+                    </div>
+                    <div className="history-rows">
+                      {group.items.map((op) => (
+                        <button
+                          key={op.id}
+                          className="history-row"
+                          onClick={() =>
+                            setOperationEditor({
+                              mode: "edit",
+                              id: op.id,
+                              label: op.label || op.text || "",
+                              amount: op.amount,
+                              account: op.account,
+                              category: op.category || "Другое",
+                              type: op.type,
+                              date: formatDateInput(
+                                op.createdAt || op.date || op.created_at || ""
+                              ),
+                            })
+                          }
+                        >
+                          <div className="history-row-main">
+                            <span className="history-emoji">
+                              {op.labelEmoji || "🧾"}
+                            </span>
+                            <span className="history-label">{op.label || op.text}</span>
+                          </div>
+                          <span className="history-amount">
+                            {formatMoney(op.amount, settings.currencySymbol)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <button
+              className="btn ghost"
+              onClick={() =>
+                setCategoryEditor({
+                  id: categoryDetail.id,
+                  name: categoryDetail.name,
+                  originalName: categoryDetail.name,
+                  mode: "edit",
+                })
+              }
+            >
+              Редактировать категорию
+            </button>
+          </section>
+        );
+      }
+
       if (incomeSourceDetail) {
         return (
           <section className="overview-shell">
@@ -1977,6 +2200,7 @@ function App() {
                       return;
                     }
                     setIncomeSourceDetail(null);
+                    setCategoryDetail(null);
                     setAccountDetail({
                       id: acc.key,
                       name: acc.label,
@@ -2000,20 +2224,21 @@ function App() {
               ))}
               <button
                 className="overview-tile add"
-                onClick={() => {
-                  if (accountEditor?.mode === "create") {
-                    setAccountEditor(null);
-                    setEditingAccountId(null);
-                    setEditingAccountName("");
-                    setNewAccountName("");
-                    return;
-                  }
-                  setIncomeSourceEditor(null);
-                  setIncomeSourceDetail(null);
-                  setAccountEditor({
-                    mode: "create",
-                    name: "",
-                    originalName: "",
+                  onClick={() => {
+                    if (accountEditor?.mode === "create") {
+                      setAccountEditor(null);
+                      setEditingAccountId(null);
+                      setEditingAccountName("");
+                      setNewAccountName("");
+                      return;
+                    }
+                    setIncomeSourceEditor(null);
+                    setIncomeSourceDetail(null);
+                    setCategoryDetail(null);
+                    setAccountEditor({
+                      mode: "create",
+                      name: "",
+                      originalName: "",
                     currencyCode: settings.currencyCode,
                     color: "#0f172a",
                     includeInBalance: true,
@@ -2045,13 +2270,14 @@ function App() {
                     key={src.id}
                     className="overview-tile income"
                     onClick={() => {
-                      if (incomeSourceDetail?.id === src.id) {
-                        setIncomeSourceDetail(null);
-                        return;
-                      }
-                      setAccountDetail(null);
-                      setIncomeSourceDetail({ id: src.id, name: src.name });
-                    }}
+                    if (incomeSourceDetail?.id === src.id) {
+                      setIncomeSourceDetail(null);
+                      return;
+                    }
+                    setAccountDetail(null);
+                    setCategoryDetail(null);
+                    setIncomeSourceDetail({ id: src.id, name: src.name });
+                  }}
                   >
                     <div className="overview-icon">💰</div>
                     <div className="overview-name">{src.name}</div>
@@ -2073,6 +2299,7 @@ function App() {
                       originalName: "",
                     });
                     setIncomeSourceDetail(null);
+                    setCategoryDetail(null);
                     setEditingIncomeSourceName("");
                     setNewIncomeSourceName("");
                   }}
@@ -2089,74 +2316,63 @@ function App() {
             </div>
           )}
 
-          {!accountEditor && (
-            <div className="overview-categories">
-            <div className="overview-section-header">
-              <div className="overview-subtitle">Категории</div>
-            </div>
-            <div className="row">
-              <input
-                className="input"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="Новая категория"
-              />
-              <button className="btn" onClick={createCategory}>
-                Добавить
-              </button>
-            </div>
-            <div className="overview-grid">
-              {categories.map((cat) => {
-                const total =
-                  totalsByCategory.find(([name]) => name === cat.name)?.[1] || 0;
-                return (
-                  <div key={cat.id} className="overview-category">
+          {!accountEditor && !incomeSourceEditor && (
+            <div className="overview-section">
+              <div className="overview-section-header">
+                <div className="overview-subtitle">Категории</div>
+              </div>
+              <div className="overview-carousel">
+                {categoryTotals.map((cat) => (
+                  <button
+                    key={cat.id}
+                    className="overview-tile category"
+                    onClick={() => {
+                      if (categoryDetail?.id === cat.id) {
+                        setCategoryDetail(null);
+                        return;
+                      }
+                      setAccountDetail(null);
+                      setIncomeSourceDetail(null);
+                      setCategoryDetail({ id: cat.id, name: cat.name });
+                    }}
+                  >
                     <div className="category-badge">
                       {categoryIcons[cat.name] || "🧾"}
                     </div>
-                    <div className="category-name">{cat.name}</div>
-                    <div className="category-amount">{formatMoney(total)}</div>
-                    <div className="row">
-                      <button
-                        className="btn ghost"
-                        onClick={() => {
-                          setEditingId(cat.id);
-                          setEditingName(cat.name);
-                        }}
-                      >
-                        Ред
-                      </button>
-                      <button className="btn danger" onClick={() => deleteCategory(cat.id)}>
-                        Удалить
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {editingId && (
-              <div className="overview-manage">
-                <div className="row">
-                  <input
-                    className="input"
-                    value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
-                  />
-                  <button className="btn" onClick={() => updateCategory(editingId)}>
-                    Сохранить
+                    <div className="overview-name">{cat.name}</div>
+                    <div className="overview-amount">{formatMoney(cat.total)}</div>
                   </button>
-                  <button
-                    className="btn ghost"
-                    onClick={() => {
-                      setEditingId(null);
-                      setEditingName("");
-                    }}
-                  >
-                    Отмена
-                  </button>
-                </div>
+                ))}
+                <button
+                  className="overview-tile add"
+                  onClick={() => {
+                    if (categoryEditor?.mode === "create") {
+                      setCategoryEditor(null);
+                      setEditingCategoryName("");
+                      setNewCategoryName("");
+                      return;
+                    }
+                    setAccountDetail(null);
+                    setIncomeSourceDetail(null);
+                    setCategoryEditor({
+                      mode: "create",
+                      name: "",
+                      originalName: "",
+                    });
+                    setCategoryDetail(null);
+                    setEditingCategoryName("");
+                    setNewCategoryName("");
+                  }}
+                >
+                  <div className="overview-icon">＋</div>
+                  <div className="overview-name">Добавить</div>
+                </button>
               </div>
-            )}
+              <div className="overview-dots">
+                {Array.from({ length: categoryPages }).map((_, idx) => (
+                  <span key={idx} className="dot" />
+                ))}
+              </div>
             </div>
           )}
           {error && <div className="error">{error}</div>}
