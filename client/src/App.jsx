@@ -1953,80 +1953,96 @@ function App() {
           }}
         >
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-title">Период</div>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                setHistoryPeriod("all");
-                setShowCustomRange(false);
-                setShowPeriodSheet(false);
-              }}
-            >
-              Все время
-            </button>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                setHistoryPeriod("today");
-                setShowCustomRange(false);
-                setShowPeriodSheet(false);
-              }}
-            >
-              Сегодня
-            </button>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                setHistoryPeriod("week");
-                setShowCustomRange(false);
-                setShowPeriodSheet(false);
-              }}
-            >
-              Неделя
-            </button>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                setHistoryPeriod("month");
-                setShowCustomRange(false);
-                setShowPeriodSheet(false);
-              }}
-            >
-              Месяц
-            </button>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                setHistoryPeriod("quarter");
-                setShowCustomRange(false);
-                setShowPeriodSheet(false);
-              }}
-            >
-              Квартал
-            </button>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                setHistoryPeriod("year");
-                setShowCustomRange(false);
-                setShowPeriodSheet(false);
-              }}
-            >
-              Год
-            </button>
-            <button
-              className="sheet-button"
-              onClick={() => {
-                const today = formatDateInput(new Date());
-                setCustomRangeDraft((prev) => ({
-                  from: prev.from || today,
-                  to: prev.to || today,
-                }));
-                setShowCustomRange(true);
-              }}
-            >
-              Свой период
-            </button>
+            <div className="sheet-title-row">
+              {showCustomRange ? (
+                <button
+                  className="sheet-back"
+                  onClick={() => setShowCustomRange(false)}
+                >
+                  ← Назад
+                </button>
+              ) : (
+                <span className="sheet-title">Период</span>
+              )}
+              {showCustomRange && <span className="sheet-title">Свой период</span>}
+            </div>
+            {!showCustomRange && (
+              <>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    setHistoryPeriod("all");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                >
+                  Все время
+                </button>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    setHistoryPeriod("today");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                >
+                  Сегодня
+                </button>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    setHistoryPeriod("week");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                >
+                  Неделя
+                </button>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    setHistoryPeriod("month");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                >
+                  Месяц
+                </button>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    setHistoryPeriod("quarter");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                >
+                  Квартал
+                </button>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    setHistoryPeriod("year");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                >
+                  Год
+                </button>
+                <button
+                  className="sheet-button"
+                  onClick={() => {
+                    const today = formatDateInput(new Date());
+                    setCustomRangeDraft((prev) => ({
+                      from: prev.from || today,
+                      to: prev.to || today,
+                    }));
+                    setShowCustomRange(true);
+                  }}
+                >
+                  Свой период
+                </button>
+              </>
+            )}
             {showCustomRange && (
               <div className="sheet-range">
                 <div className="sheet-range-row">

@@ -1044,6 +1044,23 @@
   font-size: 15px;
 }
 
+.sheet-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheet-back {
+  border: none;
+  background: #f3f4f6;
+  color: #111827;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .sheet-button {
   border: none;
   padding: 10px 12px;
@@ -1091,15 +1108,19 @@
   grid-template-columns: 1fr 1fr 1.2fr;
   gap: 6px;
   width: 100%;
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
 }
 
 .date-slot-select {
   width: 100%;
-  padding: 8px 8px;
-  border-radius: 10px;
+  padding: 10px 8px;
+  border-radius: 12px;
   border: 1px solid #d1d5db;
-  background: #f8fafc;
-  font-size: 14px;
+  background: #ffffff;
+  font-size: 15px;
   text-align: center;
   box-sizing: border-box;
   min-height: 38px;
