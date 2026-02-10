@@ -93,6 +93,7 @@ const currencyOptions = [
 
 const memoryOperations = [];
 const pendingOperations = new Map();
+const pendingEdits = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
 let dbPool = null;
@@ -310,6 +311,70 @@ async function listOperations(limit = 100, telegramUserId = null) {
     amountText: row.amount_text,
     flowLine: row.flow_line,
   }));
+}
+
+async function updateOperation(operation, telegramUserId) {
+  if (!dbPool) {
+    const idx = memoryOperations.findIndex(
+      (op) =>
+        op.id === operation.id &&
+        String(op.telegramUserId || "") === String(telegramUserId || "")
+    );
+    if (idx === -1) return false;
+    memoryOperations[idx] = { ...memoryOperations[idx], ...operation };
+    return true;
+  }
+  const amountValue = Number(operation.amount);
+  const amountCents = Number.isFinite(operation.amountCents)
+    ? operation.amountCents
+    : Number.isFinite(amountValue)
+      ? Math.round(amountValue * 100)
+      : null;
+  const query = `
+    UPDATE operations
+    SET text=$1, type=$2, amount=$3, amount_cents=$4, category=$5, account=$6,
+        account_specified=$7, label=$8, label_emoji=$9, amount_text=$10, flow_line=$11
+    WHERE id=$12 AND telegram_user_id=$13
+    RETURNING id
+  `;
+  const values = [
+    operation.text,
+    operation.type,
+    amountValue,
+    amountCents,
+    operation.category,
+    operation.account,
+    operation.accountSpecified,
+    operation.label,
+    operation.labelEmoji,
+    operation.amountText,
+    operation.flowLine,
+    operation.id,
+    telegramUserId || null,
+  ];
+  const result = await dbPool.query(query, values);
+  return result.rowCount > 0;
+}
+
+async function deleteOperationById(operationId, telegramUserId) {
+  if (!dbPool) {
+    const before = memoryOperations.length;
+    for (let i = memoryOperations.length - 1; i >= 0; i -= 1) {
+      const op = memoryOperations[i];
+      if (
+        op.id === operationId &&
+        String(op.telegramUserId || "") === String(telegramUserId || "")
+      ) {
+        memoryOperations.splice(i, 1);
+      }
+    }
+    return memoryOperations.length < before;
+  }
+  const result = await dbPool.query(
+    "DELETE FROM operations WHERE id = $1 AND telegram_user_id = $2",
+    [operationId, telegramUserId || null]
+  );
+  return result.rowCount > 0;
 }
 
 async function transcribeBuffer(buffer, filename) {
@@ -1324,6 +1389,35 @@ app.post("/telegram/webhook", (req, res) => {
         const data = cq.data || "";
         if (!chatId) return;
 
+        if (data.startsWith("edit:")) {
+          pendingEdits.set(chatId, {
+            opId: data.replace("edit:", "").trim(),
+            ownerId: cq.from?.id ? String(cq.from.id) : null,
+          });
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text:
+              "Отправь правильную формулировку, например: " +
+              '"Кофе 400 рублей, оплата картой".',
+          });
+          return;
+        }
+        if (data.startsWith("delete:")) {
+          const opId = data.replace("delete:", "").trim();
+          const ownerId = cq.from?.id ? String(cq.from.id) : null;
+          const deleted = await deleteOperationById(opId, ownerId);
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: deleted ? "Удалил операцию." : "Не удалось найти операцию.",
+          });
+          return;
+        }
         if (data.startsWith("account:")) {
           const account = data.replace("account:", "").trim();
           const pending = pendingOperations.get(chatId);
@@ -1350,7 +1444,11 @@ app.post("/telegram/webhook", (req, res) => {
             buildDisplayFields(pending.text, pending.parsed, currencySymbol)
           );
           try {
-            await saveOperation(pending.parsed);
+            if (pending.editId) {
+              await updateOperation(pending.parsed, pending.ownerId);
+            } else {
+              await saveOperation(pending.parsed);
+            }
           } catch (err) {
             console.error("Save operation failed:", err?.message || err);
           }
@@ -1363,6 +1461,14 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("sendMessage", {
             chat_id: chatId,
             text: messageText,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✏️ Исправить", callback_data: `edit:${pending.parsed.id}` },
+                  { text: "🗑️ Удалить", callback_data: `delete:${pending.parsed.id}` },
+                ],
+              ],
+            },
           });
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
@@ -1391,6 +1497,8 @@ app.post("/telegram/webhook", (req, res) => {
       const chatId = message.chat?.id;
       if (!chatId) return;
       const telegramUserId = message.from?.id ? String(message.from.id) : null;
+      const editContext = pendingEdits.get(chatId);
+      const effectiveOwnerId = editContext?.ownerId || telegramUserId;
 
       let text = "";
       if (message.text) {
@@ -1407,11 +1515,11 @@ app.post("/telegram/webhook", (req, res) => {
         return;
       }
 
-      const categoriesList = telegramUserId
-        ? await getCategoriesForOwner(telegramUserId)
+      const categoriesList = effectiveOwnerId
+        ? await getCategoriesForOwner(effectiveOwnerId)
         : defaultCategories;
-      const accountsList = telegramUserId
-        ? await getAccountsForOwner(telegramUserId)
+      const accountsList = effectiveOwnerId
+        ? await getAccountsForOwner(effectiveOwnerId)
         : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
       const parsed = parseOperation(text, categoriesList, accountsList);
       if (!parsed) {
@@ -1426,26 +1534,39 @@ app.post("/telegram/webhook", (req, res) => {
             text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
           });
         }
-        await telegramApi("sendMessage", {
-          chat_id: chatId,
-          text: "👋 Привет! Давай устроим твоим финансам порядок?",
-          reply_markup: {
-            inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
-          },
-        });
+        if (!editContext?.opId) {
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: "👋 Привет! Давай устроим твоим финансам порядок?",
+            reply_markup: {
+              inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
+            },
+          });
+        }
         return;
       }
-      if (telegramUserId) {
-        parsed.telegramUserId = telegramUserId;
+      if (effectiveOwnerId) {
+        parsed.telegramUserId = effectiveOwnerId;
+      }
+      if (editContext?.opId) {
+        parsed.id = editContext.opId;
       }
 
-      const settings = telegramUserId
-        ? await getUserSettings(telegramUserId)
+      const settings = effectiveOwnerId
+        ? await getUserSettings(effectiveOwnerId)
         : { currencyCode: "RUB" };
       const currencySymbol = getCurrencySymbol(settings.currencyCode);
       const label = extractLabel(text, parsed);
       if (!parsed.accountSpecified) {
-        pendingOperations.set(chatId, { parsed, label, text, currencySymbol });
+        pendingOperations.set(chatId, {
+          parsed,
+          label,
+          text,
+          currencySymbol,
+          editId: editContext?.opId || null,
+          ownerId: effectiveOwnerId,
+        });
+        pendingEdits.delete(chatId);
         const prompt =
           parsed.type === "income"
             ? "Уточни, куда зачислить:"
@@ -1467,10 +1588,15 @@ app.post("/telegram/webhook", (req, res) => {
 
       Object.assign(parsed, buildDisplayFields(text, parsed, currencySymbol));
       try {
-        await saveOperation(parsed);
+        if (editContext?.opId) {
+          await updateOperation(parsed, effectiveOwnerId);
+        } else {
+          await saveOperation(parsed);
+        }
       } catch (err) {
         console.error("Save operation failed:", err?.message || err);
       }
+      pendingEdits.delete(chatId);
       const messageText =
         `${parsed.labelEmoji} ${label}\n` +
         `💸 ${parsed.amountText}\n` +
@@ -1479,6 +1605,14 @@ app.post("/telegram/webhook", (req, res) => {
       await telegramApi("sendMessage", {
         chat_id: chatId,
         text: messageText,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✏️ Исправить", callback_data: `edit:${parsed.id}` },
+              { text: "🗑️ Удалить", callback_data: `delete:${parsed.id}` },
+            ],
+          ],
+        },
       });
     } catch (err) {
       console.error("Telegram webhook error:", err?.message || err);
