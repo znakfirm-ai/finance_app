@@ -17,6 +17,9 @@ const TRANSCRIBE_PROMPT =
 const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
   : null;
+const TELEGRAM_PARSE_FAIL_GIF =
+  process.env.TELEGRAM_PARSE_FAIL_GIF ||
+  "https://99px.ru/sstorage/86/2016/10/image_862610162033291453361.gif";
 const LEMMATIZE_SCRIPT = path.join(__dirname, "lemmatize.py");
 const DATABASE_URL = process.env.DATABASE_URL || process.env.RENDER_DATABASE_URL;
 const TELEGRAM_INITDATA_MAX_AGE_SEC = 24 * 60 * 60;
@@ -1384,10 +1387,17 @@ app.post("/telegram/webhook", (req, res) => {
         : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
       const parsed = parseOperation(text, categoriesList, accountsList);
       if (!parsed) {
-        await telegramApi("sendMessage", {
-          chat_id: chatId,
-          text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
-        });
+        try {
+          await telegramApi("sendAnimation", {
+            chat_id: chatId,
+            animation: TELEGRAM_PARSE_FAIL_GIF,
+          });
+        } catch (err) {
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
+          });
+        }
         return;
       }
       if (telegramUserId) {
