@@ -464,6 +464,18 @@ async function telegramApi(method, payload) {
   return data.result;
 }
 
+async function safeDeleteMessage(chatId, messageId) {
+  if (!chatId || !messageId) return;
+  try {
+    await telegramApi("deleteMessage", {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  } catch (err) {
+    // ignore delete failures (message might be too old or already deleted)
+  }
+}
+
 function verifyTelegramInitData(initData) {
   if (!initData || !process.env.TELEGRAM_BOT_TOKEN) {
     return { ok: false, error: "Missing init data or bot token" };
@@ -1440,6 +1452,7 @@ app.post("/telegram/webhook", (req, res) => {
             await telegramApi("answerCallbackQuery", { callback_query_id: cq.id });
             return;
           }
+          await safeDeleteMessage(chatId, cq.message?.message_id);
           if (field === "account") {
             const accountsList = await getAccountsForOwner(ownerId);
             await telegramApi("answerCallbackQuery", {
@@ -1501,6 +1514,7 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
+          await safeDeleteMessage(chatId, cq.message?.message_id);
           if (!op) {
             await telegramApi("sendMessage", {
               chat_id: chatId,
@@ -1541,6 +1555,7 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
+          await safeDeleteMessage(chatId, cq.message?.message_id);
           if (!op) {
             await telegramApi("sendMessage", {
               chat_id: chatId,
@@ -1571,6 +1586,7 @@ app.post("/telegram/webhook", (req, res) => {
           return;
         }
         if (data.startsWith("edit:")) {
+          await safeDeleteMessage(chatId, cq.message?.message_id);
           pendingEdits.set(chatId, {
             opId: data.replace("edit:", "").trim(),
             ownerId: cq.from?.id ? String(cq.from.id) : null,
@@ -1603,6 +1619,7 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
+          await safeDeleteMessage(chatId, cq.message?.message_id);
           await telegramApi("sendMessage", {
             chat_id: chatId,
             text: deleted ? "Удалил операцию." : "Не удалось найти операцию.",
@@ -1664,6 +1681,7 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
+          await safeDeleteMessage(chatId, pending.promptMessageId);
           pendingOperations.delete(chatId);
           return;
         }
@@ -1671,6 +1689,7 @@ app.post("/telegram/webhook", (req, res) => {
           await telegramApi("answerCallbackQuery", {
             callback_query_id: cq.id,
           });
+          await safeDeleteMessage(chatId, cq.message?.message_id);
           await telegramApi("sendMessage", {
             chat_id: chatId,
             text:
@@ -1826,7 +1845,7 @@ app.post("/telegram/webhook", (req, res) => {
           parsed.type === "income"
             ? "Уточни, куда зачислить:"
             : "Уточни, с какого счета списать:";
-        await telegramApi("sendMessage", {
+        const promptMessage = await telegramApi("sendMessage", {
           chat_id: chatId,
           text: prompt,
           reply_markup: {
@@ -1838,6 +1857,7 @@ app.post("/telegram/webhook", (req, res) => {
             ],
           },
         });
+        pendingOperations.get(chatId).promptMessageId = promptMessage?.message_id;
         return;
       }
 
