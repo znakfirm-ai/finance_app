@@ -98,7 +98,7 @@ const IconWallet = () => (
 const IconIncome = () => (
   <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
     <path
-      d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14"
+      d="M12 4v8m0 0l-3-3m3 3l3-3M5 14h14v6H5z"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.6"
@@ -121,7 +121,168 @@ const IconTag = () => (
   </svg>
 );
 
-const CategoryIcon = () => <IconTag />;
+const IconFood = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M6 4v6m3-6v6M6 10h3M12 4v6m0 0v10m4-16h2v6a2 2 0 0 1-2 2v8"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconTransport = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M5 13l1.5-5.5A2 2 0 0 1 8.4 6h7.2a2 2 0 0 1 1.9 1.5L19 13v4a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-4z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+    <circle cx="8.5" cy="14.5" r="1.2" fill="currentColor" />
+    <circle cx="15.5" cy="14.5" r="1.2" fill="currentColor" />
+  </svg>
+);
+
+const IconHouse = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconHealth = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M12 5v14M5 12h14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    />
+    <rect
+      x="4"
+      y="4"
+      width="16"
+      height="16"
+      rx="3"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+    />
+  </svg>
+);
+
+const IconLeisure = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.5L12 16.8 7.2 18l.9-5.5-3.9-3.8 5.4-.8z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconShopping = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M6 7h12l-1 13H7L6 7zm3-3h6v3H9V4z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconEducation = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M4 6l8-3 8 3-8 3-8-3zm0 4l8 3 8-3v7l-8 3-8-3v-7z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const getCategoryIcon = (name) => {
+  const value = String(name || "").toLowerCase();
+  if (
+    value.includes("еда") ||
+    value.includes("кофе") ||
+    value.includes("кафе") ||
+    value.includes("ресторан") ||
+    value.includes("продукт")
+  )
+    return IconFood;
+  if (
+    value.includes("транспорт") ||
+    value.includes("такси") ||
+    value.includes("метро") ||
+    value.includes("авто") ||
+    value.includes("бензин") ||
+    value.includes("каршер") ||
+    value.includes("парков")
+  )
+    return IconTransport;
+  if (
+    value.includes("дом") ||
+    value.includes("квартир") ||
+    value.includes("аренд") ||
+    value.includes("жкх") ||
+    value.includes("коммун")
+  )
+    return IconHouse;
+  if (
+    value.includes("здоров") ||
+    value.includes("мед") ||
+    value.includes("аптек") ||
+    value.includes("стомат")
+  )
+    return IconHealth;
+  if (
+    value.includes("развлеч") ||
+    value.includes("кино") ||
+    value.includes("спорт") ||
+    value.includes("фитнес") ||
+    value.includes("игр")
+  )
+    return IconLeisure;
+  if (
+    value.includes("покуп") ||
+    value.includes("шоп") ||
+    value.includes("одеж") ||
+    value.includes("маркет") ||
+    value.includes("магаз")
+  )
+    return IconShopping;
+  if (
+    value.includes("образ") ||
+    value.includes("учеб") ||
+    value.includes("курс") ||
+    value.includes("школ")
+  )
+    return IconEducation;
+  return IconTag;
+};
+
+const CategoryIcon = ({ name }) => {
+  const IconComponent = getCategoryIcon(name);
+  return <IconComponent />;
+};
 
 const IconTarget = () => (
   <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
@@ -1344,8 +1505,9 @@ function App() {
     { id: "goal-2", name: "Отпуск", amount: 0 },
   ];
   const debtPlaceholders = [
-    { id: "debt-1", name: "Кредит", amount: 0 },
-    { id: "debt-2", name: "Долг", amount: 0 },
+    { id: "debt-1", name: "Должны мне", amount: 0, tone: "positive" },
+    { id: "debt-2", name: "Должен я", amount: 0, tone: "negative" },
+    { id: "debt-3", name: "Кредиты", amount: 0, tone: "neutral" },
   ];
   const goalPages = Math.max(1, Math.ceil((goalPlaceholders.length + 1) / 4));
   const debtPages = Math.max(1, Math.ceil((debtPlaceholders.length + 1) / 4));
@@ -1655,7 +1817,7 @@ function App() {
                 }}
               >
                 <span className="category-icon">
-                  <CategoryIcon />
+                  <CategoryIcon name={cat.name} />
                 </span>
                 <span>{cat.name}</span>
               </button>
@@ -2378,6 +2540,9 @@ function App() {
           </div>
 
           <div className="overview-section">
+            <div className="overview-section-header">
+              <div className="overview-subtitle">Счета</div>
+            </div>
             <div className="overview-carousel">
               {accountTiles.map((acc) => (
                 <button
@@ -2455,6 +2620,9 @@ function App() {
 
           {!accountEditor && !incomeSourceEditor && (
             <div className="overview-section">
+              <div className="overview-section-header">
+                <div className="overview-subtitle">Доходы</div>
+              </div>
               <div className="overview-carousel">
                 {incomeSourceTotals.map((src) => (
                   <button
@@ -2512,7 +2680,7 @@ function App() {
           {!accountEditor && !incomeSourceEditor && (
             <div className="overview-section">
               <div className="overview-section-header">
-                <div className="overview-subtitle">Категории</div>
+                <div className="overview-subtitle">Расходы</div>
               </div>
               <div className="overview-carousel">
                 {categoryTotals.map((cat) => (
@@ -2542,7 +2710,7 @@ function App() {
                     }}
                   >
                     <div className="category-badge">
-                      <CategoryIcon />
+                      <CategoryIcon name={cat.name} />
                     </div>
                     <div className="overview-name">{cat.name}</div>
                     <div className="overview-amount">{formatMoney(cat.total)}</div>
@@ -2591,9 +2759,9 @@ function App() {
               <div className="overview-section-header">
                 <div className="overview-subtitle">Цели</div>
               </div>
-              <div className="overview-carousel">
+              <div className="overview-carousel compact">
                 {goalPlaceholders.map((goal) => (
-                  <div key={goal.id} className="overview-tile placeholder goal">
+                  <div key={goal.id} className="overview-tile compact placeholder goal">
                     <div className="overview-icon">
                       <IconTarget />
                     </div>
@@ -2601,7 +2769,7 @@ function App() {
                     <div className="overview-amount">{formatMoney(goal.amount)}</div>
                   </div>
                 ))}
-                <div className="overview-tile add placeholder">
+                <div className="overview-tile compact add placeholder">
                   <div className="overview-icon">＋</div>
                   <div className="overview-name">Добавить</div>
                 </div>
@@ -2619,9 +2787,12 @@ function App() {
               <div className="overview-section-header">
                 <div className="overview-subtitle">Долги / Кредиты</div>
               </div>
-              <div className="overview-carousel">
+              <div className="overview-carousel compact">
                 {debtPlaceholders.map((item) => (
-                  <div key={item.id} className="overview-tile placeholder debt">
+                  <div
+                    key={item.id}
+                    className={`overview-tile compact placeholder debt ${item.tone || ""}`}
+                  >
                     <div className="overview-icon">
                       <IconDebt />
                     </div>
@@ -2629,7 +2800,7 @@ function App() {
                     <div className="overview-amount">{formatMoney(item.amount)}</div>
                   </div>
                 ))}
-                <div className="overview-tile add placeholder">
+                <div className="overview-tile compact add placeholder">
                   <div className="overview-icon">＋</div>
                   <div className="overview-name">Добавить</div>
                 </div>
