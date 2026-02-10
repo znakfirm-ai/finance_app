@@ -2449,8 +2449,6 @@ app.post("/api/accounts", async (req, res) => {
         : true;
     const openingBalanceRaw = Number(req.body?.openingBalance || 0);
     const openingBalance = Number.isFinite(openingBalanceRaw) ? openingBalanceRaw : 0;
-    const openingBalanceRaw = Number(req.body?.openingBalance || 0);
-    const openingBalance = Number.isFinite(openingBalanceRaw) ? openingBalanceRaw : 0;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
