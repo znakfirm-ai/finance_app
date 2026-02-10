@@ -94,6 +94,7 @@ const currencyOptions = [
 const memoryOperations = [];
 const pendingOperations = new Map();
 const pendingEdits = new Map();
+const pendingOnboarding = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
 let dbPool = null;
@@ -474,6 +475,14 @@ async function safeDeleteMessage(chatId, messageId) {
   } catch (err) {
     // ignore delete failures (message might be too old or already deleted)
   }
+}
+
+async function clearOnboardingMessages(chatId) {
+  const info = pendingOnboarding.get(chatId);
+  if (!info) return;
+  await safeDeleteMessage(chatId, info.gifMessageId);
+  await safeDeleteMessage(chatId, info.promptMessageId);
+  pendingOnboarding.delete(chatId);
 }
 
 function verifyTelegramInitData(initData) {
@@ -1499,9 +1508,15 @@ app.post("/telegram/webhook", (req, res) => {
             field === "name"
               ? "Напиши новое наименование."
               : "Напиши новую сумму, например: 450 или 450.50";
-          await telegramApi("sendMessage", {
+          const promptMessage = await telegramApi("sendMessage", {
             chat_id: chatId,
             text: prompt,
+          });
+          pendingEdits.set(chatId, {
+            opId,
+            ownerId,
+            field,
+            promptMessageId: promptMessage?.message_id,
           });
           return;
         }
@@ -1690,11 +1705,16 @@ app.post("/telegram/webhook", (req, res) => {
             callback_query_id: cq.id,
           });
           await safeDeleteMessage(chatId, cq.message?.message_id);
-          await telegramApi("sendMessage", {
+          const promptMessage = await telegramApi("sendMessage", {
             chat_id: chatId,
             text:
               "Запиши мне голосовое или отправь текстовое сообщение, например: " +
               '"Кофе 400 рублей, оплата картой".',
+          });
+          const existing = pendingOnboarding.get(chatId) || {};
+          pendingOnboarding.set(chatId, {
+            ...existing,
+            promptMessageId: promptMessage?.message_id,
           });
           return;
         }
@@ -1724,6 +1744,28 @@ app.post("/telegram/webhook", (req, res) => {
         });
         return;
       }
+
+      if (message.text && message.text.trim() === "/start") {
+        const gifMessage = await telegramApi("sendAnimation", {
+          chat_id: chatId,
+          animation: TELEGRAM_PARSE_FAIL_GIF,
+        });
+        const promptMessage = await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text: "👋 Привет! Давай устроим твоим финансам порядок?",
+          reply_markup: {
+            inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
+          },
+        });
+        pendingOnboarding.set(chatId, {
+          gifMessageId: gifMessage?.message_id,
+          promptMessageId: promptMessage?.message_id,
+        });
+        await safeDeleteMessage(chatId, message.message_id);
+        return;
+      }
+
+      await clearOnboardingMessages(chatId);
 
       if (editContext?.opId && editContext?.field) {
         const op = await getOperationById(editContext.opId, effectiveOwnerId);
@@ -1770,6 +1812,7 @@ app.post("/telegram/webhook", (req, res) => {
           op.type === "income" ? `📉 Доход: ${op.account}` : `📈 Расход: ${op.account}`;
         await updateOperation(op, effectiveOwnerId);
         pendingEdits.delete(chatId);
+        await safeDeleteMessage(chatId, editContext.promptMessageId);
         await telegramApi("sendMessage", {
           chat_id: chatId,
           text:
@@ -1798,9 +1841,13 @@ app.post("/telegram/webhook", (req, res) => {
       const parsed = parseOperation(text, categoriesList, accountsList);
       if (!parsed) {
         try {
-          await telegramApi("sendAnimation", {
+          const gifMessage = await telegramApi("sendAnimation", {
             chat_id: chatId,
             animation: TELEGRAM_PARSE_FAIL_GIF,
+          });
+          pendingOnboarding.set(chatId, {
+            ...(pendingOnboarding.get(chatId) || {}),
+            gifMessageId: gifMessage?.message_id,
           });
         } catch (err) {
           await telegramApi("sendMessage", {
@@ -1809,12 +1856,16 @@ app.post("/telegram/webhook", (req, res) => {
           });
         }
         if (!editContext?.opId) {
-          await telegramApi("sendMessage", {
+          const promptMessage = await telegramApi("sendMessage", {
             chat_id: chatId,
             text: "👋 Привет! Давай устроим твоим финансам порядок?",
             reply_markup: {
               inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
             },
+          });
+          pendingOnboarding.set(chatId, {
+            ...(pendingOnboarding.get(chatId) || {}),
+            promptMessageId: promptMessage?.message_id,
           });
         }
         return;
