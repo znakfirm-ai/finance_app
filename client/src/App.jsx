@@ -700,6 +700,155 @@ function App() {
       const accountCurrencySymbol = accountEditor
         ? currencySymbolByCode(accountEditor.currencyCode || settings.currencyCode)
         : settings.currencySymbol;
+      const accountEditorView = accountEditor ? (
+        <div className="overview-manage">
+          <div className="overview-manage-header">
+            <div className="overview-manage-title">
+              {accountEditor.mode === "create" ? "Новый счет" : "Счет"}
+            </div>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setAccountEditor(null);
+                setEditingAccountId(null);
+                setEditingAccountName("");
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+          <div className="row">
+            <input
+              className="input"
+              value={accountEditor.mode === "create" ? newAccountName : editingAccountName}
+              onChange={(e) => {
+                if (accountEditor.mode === "create") {
+                  setNewAccountName(e.target.value);
+                } else {
+                  setEditingAccountName(e.target.value);
+                }
+              }}
+              placeholder="Новый счет"
+            />
+            {accountEditor.mode === "create" ? (
+              <button className="btn" onClick={createAccount}>
+                Добавить
+              </button>
+            ) : (
+              <button className="btn" onClick={() => updateAccount(accountEditor.id)}>
+                Сохранить
+              </button>
+            )}
+          </div>
+          {accountEditor.mode === "edit" && (
+            <div className="account-preview">
+              <div
+                className="account-preview-card"
+                style={{ background: accountEditor.color || "#0f172a" }}
+              >
+                <div className="balance-title">{accountEditor.name}</div>
+                <div className="balance-value">
+                  {formatMoney(
+                    accountOps.reduce((sum, op) => {
+                      const value = Number(op.amount || 0);
+                      return op.type === "income" ? sum + value : sum - value;
+                    }, 0),
+                    accountCurrencySymbol
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="row">
+            <label className="label">Валюта</label>
+            <select
+              className="select"
+              value={accountEditor.currencyCode}
+              onChange={(e) =>
+                setAccountEditor((prev) => ({
+                  ...prev,
+                  currencyCode: e.target.value,
+                }))
+              }
+            >
+              {currencyOptions.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.code} {c.symbol}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="row">
+            <label className="label">Цвет</label>
+            <div className="color-row">
+              {accountColors.map((color) => (
+                <button
+                  key={color}
+                  className={accountEditor.color === color ? "color-dot active" : "color-dot"}
+                  style={{ background: color }}
+                  onClick={() =>
+                    setAccountEditor((prev) => ({
+                      ...prev,
+                      color,
+                    }))
+                  }
+                />
+              ))}
+            </div>
+          </div>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={accountEditor.includeInBalance !== false}
+              onChange={(e) =>
+                setAccountEditor((prev) => ({
+                  ...prev,
+                  includeInBalance: e.target.checked,
+                }))
+              }
+            />
+            Учитывать в общем балансе
+          </label>
+          {accountEditor.mode === "edit" && (
+            <button className="btn danger" onClick={() => deleteAccount(accountEditor.id)}>
+              Удалить счет
+            </button>
+          )}
+
+          {accountEditor.mode === "edit" && (
+            <>
+              <div className="overview-subtitle">История операций</div>
+              <ul className="list compact">
+                {accountOps.length === 0 ? (
+                  <li className="muted">Пока нет операций</li>
+                ) : (
+                  accountOps.slice(0, 6).map((op) => (
+                    <li key={op.id} className="analytics-row">
+                      <span>{op.label || op.text}</span>
+                      <strong>{formatMoney(op.amount, accountCurrencySymbol)}</strong>
+                    </li>
+                  ))
+                )}
+              </ul>
+              <div className="overview-subtitle">Отчеты</div>
+              <div className="overview-report">
+                <div>
+                  <div className="report-label">Доход</div>
+                  <div className="report-value">
+                    {formatMoney(accountIncome, accountCurrencySymbol)}
+                  </div>
+                </div>
+                <div>
+                  <div className="report-label">Расход</div>
+                  <div className="report-value">
+                    {formatMoney(accountExpense, accountCurrencySymbol)}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      ) : null;
 
       return (
         <section className="overview-shell">
@@ -731,6 +880,12 @@ function App() {
                   key={acc.key}
                   className="overview-tile"
                   onClick={() => {
+                    if (accountEditor?.mode === "edit" && accountEditor.id === acc.key) {
+                      setAccountEditor(null);
+                      setEditingAccountId(null);
+                      setEditingAccountName("");
+                      return;
+                    }
                     setAccountEditor({
                       mode: "edit",
                       id: acc.key,
@@ -758,6 +913,13 @@ function App() {
               <button
                 className="overview-tile add"
                 onClick={() => {
+                  if (accountEditor?.mode === "create") {
+                    setAccountEditor(null);
+                    setEditingAccountId(null);
+                    setEditingAccountName("");
+                    setNewAccountName("");
+                    return;
+                  }
                   setAccountEditor({
                     mode: "create",
                     name: "",
@@ -782,161 +944,9 @@ function App() {
             </div>
           </div>
 
-          {accountEditor && (
-            <div className="overview-manage">
-              <div className="overview-manage-header">
-                <div className="overview-manage-title">
-                  {accountEditor.mode === "create" ? "Новый счет" : "Счет"}
-                </div>
-                <button
-                  className="btn ghost"
-                  onClick={() => {
-                    setAccountEditor(null);
-                    setEditingAccountId(null);
-                    setEditingAccountName("");
-                  }}
-                >
-                  Закрыть
-                </button>
-              </div>
-              <div className="row">
-                <input
-                  className="input"
-                  value={accountEditor.mode === "create" ? newAccountName : editingAccountName}
-                  onChange={(e) => {
-                    if (accountEditor.mode === "create") {
-                      setNewAccountName(e.target.value);
-                    } else {
-                      setEditingAccountName(e.target.value);
-                    }
-                  }}
-                  placeholder="Новый счет"
-                />
-                {accountEditor.mode === "create" ? (
-                  <button className="btn" onClick={createAccount}>
-                    Добавить
-                  </button>
-                ) : (
-                  <button className="btn" onClick={() => updateAccount(accountEditor.id)}>
-                    Сохранить
-                  </button>
-                )}
-              </div>
-              {accountEditor.mode === "edit" && (
-                <div className="account-preview">
-                  <div
-                    className="account-preview-card"
-                    style={{ background: accountEditor.color || "#0f172a" }}
-                  >
-                    <div className="balance-title">{accountEditor.name}</div>
-                    <div className="balance-value">
-                      {formatMoney(
-                        accountOps.reduce((sum, op) => {
-                          const value = Number(op.amount || 0);
-                          return op.type === "income" ? sum + value : sum - value;
-                        }, 0),
-                        accountCurrencySymbol
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="row">
-                <label className="label">Валюта</label>
-                <select
-                  className="select"
-                  value={accountEditor.currencyCode}
-                  onChange={(e) =>
-                    setAccountEditor((prev) => ({
-                      ...prev,
-                      currencyCode: e.target.value,
-                    }))
-                  }
-                >
-                  {currencyOptions.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.code} {c.symbol}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="row">
-                <label className="label">Цвет</label>
-                <div className="color-row">
-                  {accountColors.map((color) => (
-                    <button
-                      key={color}
-                      className={
-                        accountEditor.color === color ? "color-dot active" : "color-dot"
-                      }
-                      style={{ background: color }}
-                      onClick={() =>
-                        setAccountEditor((prev) => ({
-                          ...prev,
-                          color,
-                        }))
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={accountEditor.includeInBalance !== false}
-                  onChange={(e) =>
-                    setAccountEditor((prev) => ({
-                      ...prev,
-                      includeInBalance: e.target.checked,
-                    }))
-                  }
-                />
-                Учитывать в общем балансе
-              </label>
-              {accountEditor.mode === "edit" && (
-                <button className="btn danger" onClick={() => deleteAccount(accountEditor.id)}>
-                  Удалить счет
-                </button>
-              )}
+          {accountEditorView}
 
-              {accountEditor.mode === "edit" && (
-                <>
-                  <div className="overview-subtitle">История операций</div>
-                  <ul className="list compact">
-                    {accountOps.length === 0 ? (
-                      <li className="muted">Пока нет операций</li>
-                    ) : (
-                      accountOps.slice(0, 6).map((op) => (
-                        <li key={op.id} className="analytics-row">
-                          <span>{op.label || op.text}</span>
-                          <strong>
-                            {formatMoney(op.amount, accountCurrencySymbol)}
-                          </strong>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                  <div className="overview-subtitle">Отчеты</div>
-                  <div className="overview-report">
-                    <div>
-                      <div className="report-label">Доход</div>
-                      <div className="report-value">
-                        {formatMoney(accountIncome, accountCurrencySymbol)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="report-label">Расход</div>
-                      <div className="report-value">
-                        {formatMoney(accountExpense, accountCurrencySymbol)}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {incomeByCategory.length > 0 && (
+          {!accountEditor && incomeByCategory.length > 0 && (
             <div className="overview-section">
               <div className="overview-carousel">
                 {incomeByCategory.slice(0, 8).map(([name, value]) => (
@@ -955,7 +965,8 @@ function App() {
             </div>
           )}
 
-          <div className="overview-categories">
+          {!accountEditor && (
+            <div className="overview-categories">
             <div className="overview-section-header">
               <div className="overview-subtitle">Категории</div>
             </div>
@@ -1022,7 +1033,8 @@ function App() {
                 </div>
               </div>
             )}
-          </div>
+            </div>
+          )}
           {error && <div className="error">{error}</div>}
         </section>
       );
@@ -1250,57 +1262,59 @@ function App() {
       )}
 
       <main className="content">{content}</main>
-      <nav className="quick-actions">
-        <button
-          className={quickActive.home ? "quick-card active" : "quick-card"}
-          onClick={() => {
-            setHistoryFilter({ type: "all", category: null });
-            setView("home");
-          }}
-        >
-          <IconHome />
-          <span>Главная</span>
-        </button>
-        <button
-          className={quickActive.overview ? "quick-card active" : "quick-card"}
-          onClick={() => {
-            setAccountEditor(null);
-            setEditingAccountId(null);
-            setEditingAccountName("");
-            setView("overview");
-          }}
-        >
-          <IconGrid />
-          <span>Обзор</span>
-        </button>
-        <button
-          className={quickActive.add ? "quick-card add active" : "quick-card add"}
-          onClick={() => {
-            setView("categories");
-          }}
-        >
-          <IconPlus />
-          <span>Добавить</span>
-        </button>
-        <button
-          className={quickActive.reports ? "quick-card active" : "quick-card"}
-          onClick={() => {
-            setView("analytics");
-          }}
-        >
-          <IconChart />
-          <span>Отчеты</span>
-        </button>
-        <button
-          className={quickActive.settings ? "quick-card active" : "quick-card"}
-          onClick={() => {
-            setView("settings");
-          }}
-        >
-          <IconSettings />
-          <span>Настройки</span>
-        </button>
-      </nav>
+      {!accountEditor && (
+        <nav className="quick-actions">
+          <button
+            className={quickActive.home ? "quick-card active" : "quick-card"}
+            onClick={() => {
+              setHistoryFilter({ type: "all", category: null });
+              setView("home");
+            }}
+          >
+            <IconHome />
+            <span>Главная</span>
+          </button>
+          <button
+            className={quickActive.overview ? "quick-card active" : "quick-card"}
+            onClick={() => {
+              setAccountEditor(null);
+              setEditingAccountId(null);
+              setEditingAccountName("");
+              setView("overview");
+            }}
+          >
+            <IconGrid />
+            <span>Обзор</span>
+          </button>
+          <button
+            className={quickActive.add ? "quick-card add active" : "quick-card add"}
+            onClick={() => {
+              setView("categories");
+            }}
+          >
+            <IconPlus />
+            <span>Добавить</span>
+          </button>
+          <button
+            className={quickActive.reports ? "quick-card active" : "quick-card"}
+            onClick={() => {
+              setView("analytics");
+            }}
+          >
+            <IconChart />
+            <span>Отчеты</span>
+          </button>
+          <button
+            className={quickActive.settings ? "quick-card active" : "quick-card"}
+            onClick={() => {
+              setView("settings");
+            }}
+          >
+            <IconSettings />
+            <span>Настройки</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }
