@@ -1695,13 +1695,6 @@ function App() {
 
   return (
     <div className="page">
-      {view !== "home" && (
-        <header className="header">
-          <h1>Личные финансы</h1>
-          <p>Выберите категорию и добавьте операцию</p>
-        </header>
-      )}
-
       <main className="content">{content}</main>
       {showPeriodSheet && (
         <div
