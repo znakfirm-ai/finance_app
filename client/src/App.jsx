@@ -1216,13 +1216,21 @@ function App() {
       const date = new Date(op.createdAt || op.date || op.created_at);
       const key = Number.isNaN(date.getTime()) ? "Без даты" : fmt.format(date);
       const amount = Number(op.amount || 0);
-      const signed = op.type === "income" ? amount : -amount;
+      const expenseAmount = op.type === "income" ? 0 : amount;
+      const incomeAmount = op.type === "income" ? amount : 0;
       if (key !== currentKey) {
         currentKey = key;
-        groups.push({ key, items: [op], total: signed });
+        groups.push({
+          key,
+          items: [op],
+          expenseTotal: expenseAmount,
+          incomeTotal: incomeAmount,
+        });
       } else {
-        groups[groups.length - 1].items.push(op);
-        groups[groups.length - 1].total += signed;
+        const group = groups[groups.length - 1];
+        group.items.push(op);
+        group.expenseTotal += expenseAmount;
+        group.incomeTotal += incomeAmount;
       }
     });
     return groups;
@@ -1321,6 +1329,11 @@ function App() {
     });
     const symbol = symbolOverride || settings.currencySymbol || "₽";
     return `${formatted} ${symbol}`;
+  };
+
+  const formatSignedMoney = (value, type, symbolOverride) => {
+    const sign = type === "income" ? "+" : "-";
+    return `${sign}${formatMoney(Math.abs(value || 0), symbolOverride)}`;
   };
 
   const quickActive = {
@@ -1921,9 +1934,11 @@ function App() {
                   <div key={group.key} className="history-group">
                     <div className="history-date-row">
                       <div className="history-date">{group.key}</div>
-                      <div className="history-date-total">
-                        {formatMoney(Math.abs(group.total), settings.currencySymbol)}
-                      </div>
+                      {group.expenseTotal > 0 && (
+                        <div className="history-date-total">
+                          {formatMoney(group.expenseTotal, settings.currencySymbol)}
+                        </div>
+                      )}
                     </div>
                     <div className="history-rows">
                       {group.items.map((op) => (
@@ -1951,8 +1966,10 @@ function App() {
                             </span>
                             <span className="history-label">{op.label || op.text}</span>
                           </div>
-                          <span className="history-amount">
-                            {formatMoney(op.amount, settings.currencySymbol)}
+                          <span
+                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                          >
+                            {formatSignedMoney(op.amount, op.type, settings.currencySymbol)}
                           </span>
                         </button>
                       ))}
@@ -2033,9 +2050,11 @@ function App() {
                   <div key={group.key} className="history-group">
                     <div className="history-date-row">
                       <div className="history-date">{group.key}</div>
-                      <div className="history-date-total">
-                        {formatMoney(Math.abs(group.total), settings.currencySymbol)}
-                      </div>
+                      {group.expenseTotal > 0 && (
+                        <div className="history-date-total">
+                          {formatMoney(group.expenseTotal, settings.currencySymbol)}
+                        </div>
+                      )}
                     </div>
                     <div className="history-rows">
                       {group.items.map((op) => (
@@ -2064,8 +2083,10 @@ function App() {
                             </span>
                             <span className="history-label">{op.label || op.text}</span>
                           </div>
-                          <span className="history-amount">
-                            {formatMoney(op.amount, settings.currencySymbol)}
+                          <span
+                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                          >
+                            {formatSignedMoney(op.amount, op.type, settings.currencySymbol)}
                           </span>
                         </button>
                       ))}
@@ -2129,14 +2150,16 @@ function App() {
                   <div key={group.key} className="history-group">
                     <div className="history-date-row">
                       <div className="history-date">{group.key}</div>
-                      <div className="history-date-total">
-                        {formatMoney(
-                          Math.abs(group.total),
-                          currencySymbolByCode(
-                            accountDetail.currencyCode || settings.currencyCode
-                          )
-                        )}
-                      </div>
+                      {group.expenseTotal > 0 && (
+                        <div className="history-date-total">
+                          {formatMoney(
+                            group.expenseTotal,
+                            currencySymbolByCode(
+                              accountDetail.currencyCode || settings.currencyCode
+                            )
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="history-rows">
                       {group.items.map((op) => (
@@ -2165,9 +2188,12 @@ function App() {
                             </span>
                             <span className="history-label">{op.label || op.text}</span>
                           </div>
-                          <div className="history-amount">
-                            {formatMoney(
+                          <div
+                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                          >
+                            {formatSignedMoney(
                               op.amount,
+                              op.type,
                               currencySymbolByCode(
                                 accountDetail.currencyCode || settings.currencyCode
                               )
