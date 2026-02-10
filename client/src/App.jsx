@@ -2502,6 +2502,11 @@ function App() {
                     </div>
                     <div className="overview-name">{cat.name}</div>
                     <div className="overview-amount">{formatMoney(cat.total)}</div>
+                    {cat.budget !== null && cat.budget !== undefined && (
+                      <div className="overview-budget">
+                        Бюджет: {formatMoney(cat.budget)}
+                      </div>
+                    )}
                   </button>
                 ))}
                 <button
