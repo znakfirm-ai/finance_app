@@ -1124,6 +1124,13 @@
   text-align: center;
   box-sizing: border-box;
   min-height: 38px;
+  color: #111827;
+  font-weight: 600;
+  -webkit-text-fill-color: #111827;
+}
+
+.date-slot-select option {
+  color: #111827;
 }
 
 @media (max-width: 640px) {
