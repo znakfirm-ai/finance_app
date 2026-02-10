@@ -69,6 +69,18 @@
   outline: none;
   box-sizing: border-box;
   display: block;
+  min-height: 44px;
+  background: #ffffff;
+  color: #111827;
+}
+
+.input[type="date"] {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
 }
 
 .select {
