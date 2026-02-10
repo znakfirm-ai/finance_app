@@ -612,6 +612,28 @@
   font-weight: 700;
 }
 
+.tile-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.stat-icon .tile-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.overview-tile.category.budget-near {
+  border-color: #f59e0b;
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.12);
+}
+
+.overview-tile.category.budget-over {
+  border-color: #ef4444;
+  background: #fff5f5;
+  box-shadow: 0 10px 24px rgba(239, 68, 68, 0.12);
+}
+
 .overview-dots {
   display: flex;
   justify-content: center;
@@ -779,6 +801,16 @@
   display: grid;
   place-items: center;
   font-size: 20px;
+}
+
+.overview-tile.category.budget-near .category-badge {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.overview-tile.category.budget-over .category-badge {
+  background: #fee2e2;
+  color: #ef4444;
 }
 
 .category-name {

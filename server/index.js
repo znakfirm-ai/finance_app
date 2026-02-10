@@ -221,6 +221,9 @@ async function initDb() {
     );
   `);
   await dbPool.query(
+    "ALTER TABLE categories ADD COLUMN IF NOT EXISTS budget numeric(12,2);"
+  );
+  await dbPool.query(
     "CREATE INDEX IF NOT EXISTS categories_owner_id_idx ON categories(owner_id);"
   );
 
@@ -851,11 +854,12 @@ async function getCategoriesForOwner(ownerId) {
     return defaultCategories.map((cat, index) => ({
       id: `cat_default_${index}`,
       name: cat.name,
+      budget: null,
       keywords: cat.keywords,
     }));
   }
   const { rows } = await dbPool.query(
-    "SELECT id, name FROM categories WHERE owner_id = $1 ORDER BY created_at ASC",
+    "SELECT id, name, budget FROM categories WHERE owner_id = $1 ORDER BY created_at ASC",
     [ownerId]
   );
   if (!rows.length) {
@@ -864,24 +868,28 @@ async function getCategoriesForOwner(ownerId) {
       `cat_${now}_${index}`,
       ownerId,
       cat.name,
+      null,
     ]);
     const placeholders = values
-      .map((_, idx) => `($${idx * 3 + 1}, $${idx * 3 + 2}, $${idx * 3 + 3})`)
+      .map((_, idx) => `($${idx * 4 + 1}, $${idx * 4 + 2}, $${idx * 4 + 3}, $${idx * 4 + 4})`)
       .join(",");
     const flat = values.flat();
     await dbPool.query(
-      `INSERT INTO categories (id, owner_id, name) VALUES ${placeholders}`,
+      `INSERT INTO categories (id, owner_id, name, budget) VALUES ${placeholders}`,
       flat
     );
     return defaultCategories.map((cat, index) => ({
       id: `cat_${now}_${index}`,
       name: cat.name,
+      budget: null,
       keywords: cat.keywords,
     }));
   }
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
+    budget:
+      row.budget !== null && row.budget !== undefined ? Number(row.budget) : null,
     keywords:
       row.name === "Другое"
         ? []
@@ -2587,7 +2595,13 @@ app.get("/api/categories", async (req, res) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const categoriesList = await getCategoriesForOwner(owner.ownerId);
-    res.json(categoriesList.map((c) => ({ id: c.id, name: c.name })));
+    res.json(
+      categoriesList.map((c) => ({
+        id: c.id,
+        name: c.name,
+        budget: c.budget ?? null,
+      }))
+    );
   } catch (err) {
     console.error("Load categories failed:", err?.message || err);
     res.status(500).json({ error: "Failed to load categories" });
@@ -2607,15 +2621,21 @@ app.post("/api/categories", async (req, res) => {
     if (!name) {
       return res.status(400).json({ error: "Name is required" });
     }
+    const budgetRaw = req.body?.budget;
+    const budgetValue =
+      budgetRaw === null || budgetRaw === undefined || budgetRaw === ""
+        ? null
+        : Number(budgetRaw);
+    const budget = Number.isFinite(budgetValue) ? budgetValue : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const id = `cat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     await dbPool.query(
-      "INSERT INTO categories (id, owner_id, name) VALUES ($1, $2, $3)",
-      [id, owner.ownerId, name]
+      "INSERT INTO categories (id, owner_id, name, budget) VALUES ($1, $2, $3, $4)",
+      [id, owner.ownerId, name, budget]
     );
-    res.json({ id, name });
+    res.json({ id, name, budget });
   } catch (err) {
     console.error("Create category failed:", err?.message || err);
     res.status(500).json({ error: "Failed to create category" });
@@ -2633,6 +2653,12 @@ app.put("/api/categories/:id", async (req, res) => {
     }
     const id = String(req.params.id || "");
     const name = String(req.body?.name || "").trim();
+    const budgetRaw = req.body?.budget;
+    const budgetValue =
+      budgetRaw === null || budgetRaw === undefined || budgetRaw === ""
+        ? null
+        : Number(budgetRaw);
+    const budget = Number.isFinite(budgetValue) ? budgetValue : null;
     if (!id || !name) {
       return res.status(400).json({ error: "Invalid input" });
     }
@@ -2648,8 +2674,8 @@ app.put("/api/categories/:id", async (req, res) => {
     }
     const oldName = current.rows[0].name;
     const result = await dbPool.query(
-      "UPDATE categories SET name = $1 WHERE id = $2 AND owner_id = $3",
-      [name, id, owner.ownerId]
+      "UPDATE categories SET name = $1, budget = $2 WHERE id = $3 AND owner_id = $4",
+      [name, budget, id, owner.ownerId]
     );
     if (!result.rowCount) {
       return res.status(404).json({ error: "Category not found" });
@@ -2658,7 +2684,7 @@ app.put("/api/categories/:id", async (req, res) => {
       "UPDATE operations SET category = $1 WHERE telegram_user_id = $2 AND type = 'expense' AND category = $3",
       [name, owner.ownerId, oldName]
     );
-    res.json({ id, name });
+    res.json({ id, name, budget });
   } catch (err) {
     console.error("Update category failed:", err?.message || err);
     res.status(500).json({ error: "Failed to update category" });

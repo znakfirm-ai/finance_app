@@ -81,6 +81,48 @@ const IconChevron = ({ direction = "right" }) => (
   </svg>
 );
 
+const IconWallet = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M4 7h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm0 0V6a2 2 0 0 1 2-2h10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    />
+    <circle cx="17" cy="12" r="1.2" fill="currentColor" />
+  </svg>
+);
+
+const IconIncome = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const IconTag = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M3 12V4h8l10 10-8 8L3 12zm5-5h.01"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const CategoryIcon = () => <IconTag />;
+
 function App() {
   const [view, setView] = useState("home");
   const [operations, setOperations] = useState([]);
@@ -105,6 +147,8 @@ function App() {
   const [categoryEditor, setCategoryEditor] = useState(null);
   const [categoryDetail, setCategoryDetail] = useState(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
+  const [editingCategoryBudget, setEditingCategoryBudget] = useState("");
+  const [newCategoryBudget, setNewCategoryBudget] = useState("");
   const [categorySaveMessage, setCategorySaveMessage] = useState("");
   const [newAccountName, setNewAccountName] = useState("");
   const [newIncomeSourceName, setNewIncomeSourceName] = useState("");
@@ -352,7 +396,9 @@ function App() {
       setCategoryEditor(null);
       setCategoryDetail(null);
       setEditingCategoryName("");
+      setEditingCategoryBudget("");
       setNewCategoryName("");
+      setNewCategoryBudget("");
       setOperationEditor(null);
     }
   }, [view]);
@@ -429,10 +475,17 @@ function App() {
     if (!categoryEditor) return;
     if (categoryEditor.mode === "create") {
       setNewCategoryName("");
+      setNewCategoryBudget("");
       setEditingCategoryName("");
+      setEditingCategoryBudget("");
       return;
     }
     setEditingCategoryName(categoryEditor.name || "");
+    setEditingCategoryBudget(
+      categoryEditor.budget !== null && categoryEditor.budget !== undefined
+        ? String(categoryEditor.budget)
+        : ""
+    );
   }, [categoryEditor?.id, categoryEditor?.mode, categoryEditor?.name]);
 
   const currencySymbolByCode = (code) => {
@@ -662,7 +715,8 @@ function App() {
     const name = newCategoryName.trim();
     if (!name) return;
     try {
-      const payload = { name };
+      const budgetValue = parseNumberInput(newCategoryBudget);
+      const payload = { name, budget: budgetValue ?? null };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/categories"), {
@@ -674,8 +728,12 @@ function App() {
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setCategories((prev) => [...prev, data]);
       setNewCategoryName("");
+      setNewCategoryBudget("");
       setCategoryEditor({ ...data, mode: "edit", originalName: data.name });
       setEditingCategoryName(data.name || "");
+      setEditingCategoryBudget(
+        data.budget !== null && data.budget !== undefined ? String(data.budget) : ""
+      );
       setCategorySaveMessage("Категория создана");
       setTimeout(() => setCategorySaveMessage(""), 2000);
       await loadOperations();
@@ -688,7 +746,8 @@ function App() {
     const name = editingCategoryName.trim();
     if (!name) return;
     try {
-      const payload = { name };
+      const budgetValue = parseNumberInput(editingCategoryBudget);
+      const payload = { name, budget: budgetValue ?? null };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(`/api/categories/${id}`), {
@@ -1070,6 +1129,7 @@ function App() {
       id: cat.id,
       name: cat.name,
       total: totals.get(cat.name) || 0,
+      budget: cat.budget ?? null,
     }));
   }, [categories, totalsByCategory]);
 
@@ -1296,14 +1356,6 @@ function App() {
       return true;
     });
   }, [operations, historyFilter]);
-
-  const categoryIcons = {
-    Еда: "🍽️",
-    Транспорт: "🚌",
-    "Жильё": "🏠",
-    Развлечения: "🎬",
-    Другое: "🧾",
-  };
 
   const categoryList =
     categories.length > 0
@@ -1559,7 +1611,7 @@ function App() {
                 }}
               >
                 <span className="category-icon">
-                  {categoryIcons[cat.name] || "🧾"}
+                  <CategoryIcon />
                 </span>
                 <span>{cat.name}</span>
               </button>
@@ -1849,6 +1901,15 @@ function App() {
                 onChange={(e) => setNewCategoryName(e.target.value)}
                 placeholder="Например: Еда"
               />
+              <label className="label">Бюджет на категорию</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                value={newCategoryBudget}
+                onChange={(e) => setNewCategoryBudget(e.target.value)}
+                placeholder="Не задан"
+              />
               <button className="btn" onClick={createCategory}>
                 Добавить
               </button>
@@ -1860,6 +1921,15 @@ function App() {
                 className="input"
                 value={editingCategoryName}
                 onChange={(e) => setEditingCategoryName(e.target.value)}
+              />
+              <label className="label">Бюджет на категорию</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                value={editingCategoryBudget}
+                onChange={(e) => setEditingCategoryBudget(e.target.value)}
+                placeholder="Не задан"
               />
               <div className="row">
                 <button className="btn" onClick={() => updateCategory(categoryEditor.id)}>
@@ -1987,11 +2057,15 @@ function App() {
             <button
               className="btn ghost"
               onClick={() =>
-                setCategoryEditor({
-                  id: categoryDetail.id,
-                  name: categoryDetail.name,
-                  originalName: categoryDetail.name,
-                  mode: "edit",
+                setCategoryEditor(() => {
+                  const current = categories.find((c) => c.id === categoryDetail.id);
+                  return {
+                    id: categoryDetail.id,
+                    name: categoryDetail.name,
+                    originalName: categoryDetail.name,
+                    budget: current?.budget ?? categoryDetail.budget ?? null,
+                    mode: "edit",
+                  };
                 })
               }
             >
@@ -2283,7 +2357,9 @@ function App() {
                   }}
                   style={{ background: acc.color || "#0f172a", color: "#fff" }}
                 >
-                  <div className="overview-icon inverse">💳</div>
+                  <div className="overview-icon inverse">
+                    <IconWallet />
+                  </div>
                   <div className="overview-name">{acc.label}</div>
                   <div className="overview-amount">
                     {formatMoney(
@@ -2350,7 +2426,9 @@ function App() {
                     setIncomeSourceDetail({ id: src.id, name: src.name });
                   }}
                   >
-                    <div className="overview-icon">💰</div>
+                    <div className="overview-icon">
+                      <IconIncome />
+                    </div>
                     <div className="overview-name">{src.name}</div>
                     <div className="overview-amount">{formatMoney(src.total)}</div>
                   </button>
@@ -2396,7 +2474,15 @@ function App() {
                 {categoryTotals.map((cat) => (
                   <button
                     key={cat.id}
-                    className="overview-tile category"
+                    className={`overview-tile category${
+                      cat.budget !== null && cat.budget !== undefined
+                        ? cat.total >= cat.budget
+                          ? " budget-over"
+                          : cat.total >= cat.budget * 0.8
+                            ? " budget-near"
+                            : ""
+                        : ""
+                    }`}
                     onClick={() => {
                       if (categoryDetail?.id === cat.id) {
                         setCategoryDetail(null);
@@ -2404,11 +2490,15 @@ function App() {
                       }
                       setAccountDetail(null);
                       setIncomeSourceDetail(null);
-                      setCategoryDetail({ id: cat.id, name: cat.name });
+                      setCategoryDetail({
+                        id: cat.id,
+                        name: cat.name,
+                        budget: cat.budget ?? null,
+                      });
                     }}
                   >
                     <div className="category-badge">
-                      {categoryIcons[cat.name] || "🧾"}
+                      <CategoryIcon />
                     </div>
                     <div className="overview-name">{cat.name}</div>
                     <div className="overview-amount">{formatMoney(cat.total)}</div>
@@ -2556,18 +2646,24 @@ function App() {
 
           <section className="stat-scroll">
             <div className="stat-card">
-              <div className="stat-icon">🧾</div>
+              <div className="stat-icon">
+                <IconTag />
+              </div>
               <div className="stat-title">
                 {summary.expenseCount === 0 ? "У вас пока нет расходов" : "Расходы за период"}
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon">💳</div>
+              <div className="stat-icon">
+                <IconWallet />
+              </div>
               <div className="stat-title">Сейчас на счетах</div>
               <div className="stat-value">{formatMoney(summary.balance)}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon">📈</div>
+              <div className="stat-icon">
+                <IconIncome />
+              </div>
               <div className="stat-title">Доходы</div>
               <div className="stat-value">{formatMoney(summary.income)}</div>
             </div>
