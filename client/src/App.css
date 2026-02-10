@@ -1105,28 +1105,30 @@
 
 .date-slot {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.2fr;
-  gap: 6px;
+  grid-template-columns: minmax(56px, 1fr) minmax(72px, 1.1fr) minmax(90px, 1.3fr);
+  gap: 8px;
   width: 100%;
   background: #f8fafc;
   border-radius: 14px;
-  padding: 10px;
+  padding: 10px 8px;
   border: 1px solid #e5e7eb;
 }
 
 .date-slot-select {
   width: 100%;
-  padding: 10px 8px;
+  padding: 10px 6px;
   border-radius: 12px;
   border: 1px solid #d1d5db;
   background: #ffffff;
-  font-size: 15px;
+  font-size: 16px;
   text-align: center;
+  text-align-last: center;
   box-sizing: border-box;
   min-height: 38px;
   color: #111827;
   font-weight: 600;
   -webkit-text-fill-color: #111827;
+  line-height: 1.1;
 }
 
 .date-slot-select option {
