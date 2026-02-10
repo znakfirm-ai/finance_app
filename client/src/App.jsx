@@ -517,7 +517,7 @@ function App() {
     return (
       <div className="date-slot" aria-label={ariaLabel}>
         <select
-          className="date-slot-select"
+          className="date-slot-select day"
           value={parts.day}
           onChange={(e) => onChange(updateDateValue(value, "day", e.target.value))}
         >
@@ -528,7 +528,7 @@ function App() {
           ))}
         </select>
         <select
-          className="date-slot-select"
+          className="date-slot-select month"
           value={parts.month}
           onChange={(e) => onChange(updateDateValue(value, "month", e.target.value))}
         >
@@ -539,7 +539,7 @@ function App() {
           ))}
         </select>
         <select
-          className="date-slot-select"
+          className="date-slot-select year"
           value={parts.year}
           onChange={(e) => onChange(updateDateValue(value, "year", e.target.value))}
         >
