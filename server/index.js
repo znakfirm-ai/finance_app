@@ -2516,6 +2516,8 @@ app.put("/api/accounts/:id", async (req, res) => {
       req.body?.includeInBalance === false || req.body?.includeInBalance === "false"
         ? false
         : true;
+    const openingBalanceRaw = Number(req.body?.openingBalance || 0);
+    const openingBalance = Number.isFinite(openingBalanceRaw) ? openingBalanceRaw : 0;
     if (!id || !name) {
       return res.status(400).json({ error: "Invalid input" });
     }

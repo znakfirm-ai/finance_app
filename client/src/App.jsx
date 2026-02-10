@@ -1188,6 +1188,7 @@ function App() {
               Закрыть
             </button>
           </div>
+          {error && <div className="error">{error}</div>}
           {accountEditor.mode === "create" ? (
             <div className="account-edit-panel">
               <label className="label">Название счета</label>
