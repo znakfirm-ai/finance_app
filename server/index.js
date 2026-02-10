@@ -19,7 +19,7 @@ const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   : null;
 const LEMMATIZE_SCRIPT = path.join(__dirname, "lemmatize.py");
 const DATABASE_URL = process.env.DATABASE_URL || process.env.RENDER_DATABASE_URL;
-const TELEGRAM_INITDATA_MAX_AGE_SEC = 24 * 60 * 60;
+const TELEGRAM_INITDATA_MAX_AGE_SEC = 7 * 24 * 60 * 60;
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -669,6 +669,7 @@ function getOwnerFromRequest(req) {
   if (initData) {
     const verified = verifyTelegramInitData(initData);
     if (!verified.ok) {
+      console.warn("Telegram init data verification failed:", verified.error);
       return { error: verified.error };
     }
     return { ownerId: verified.userId, source: "telegram" };
