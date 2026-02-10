@@ -411,6 +411,101 @@ function App() {
     return `${year}-${month}-${day}`;
   };
 
+  const dateToParts = (value) => {
+    const base = value ? new Date(value) : new Date();
+    const date = Number.isNaN(base.getTime()) ? new Date() : base;
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+    };
+  };
+
+  const maxDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
+
+  const buildDateString = (year, month, day) =>
+    `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+  const updateDateValue = (currentValue, part, nextValue) => {
+    const parts = dateToParts(currentValue);
+    const next = { ...parts, [part]: Number(nextValue) };
+    const maxDay = maxDaysInMonth(next.year, next.month);
+    if (next.day > maxDay) next.day = maxDay;
+    return buildDateString(next.year, next.month, next.day);
+  };
+
+  const yearOptions = useMemo(() => {
+    const now = new Date().getFullYear();
+    const start = now - 10;
+    const end = now + 2;
+    const years = [];
+    for (let year = start; year <= end; year += 1) {
+      years.push(year);
+    }
+    return years;
+  }, []);
+
+  const monthOptions = useMemo(
+    () => [
+      { value: 1, label: "Янв" },
+      { value: 2, label: "Фев" },
+      { value: 3, label: "Мар" },
+      { value: 4, label: "Апр" },
+      { value: 5, label: "Май" },
+      { value: 6, label: "Июн" },
+      { value: 7, label: "Июл" },
+      { value: 8, label: "Авг" },
+      { value: 9, label: "Сен" },
+      { value: 10, label: "Окт" },
+      { value: 11, label: "Ноя" },
+      { value: 12, label: "Дек" },
+    ],
+    []
+  );
+
+  const DateSlotPicker = ({ value, onChange, ariaLabel }) => {
+    const parts = dateToParts(value);
+    const daysInMonth = maxDaysInMonth(parts.year, parts.month);
+    const dayOptions = Array.from({ length: daysInMonth }, (_, idx) => idx + 1);
+    return (
+      <div className="date-slot" aria-label={ariaLabel}>
+        <select
+          className="date-slot-select"
+          value={parts.day}
+          onChange={(e) => onChange(updateDateValue(value, "day", e.target.value))}
+        >
+          {dayOptions.map((day) => (
+            <option key={day} value={day}>
+              {day}
+            </option>
+          ))}
+        </select>
+        <select
+          className="date-slot-select"
+          value={parts.month}
+          onChange={(e) => onChange(updateDateValue(value, "month", e.target.value))}
+        >
+          {monthOptions.map((month) => (
+            <option key={month.value} value={month.value}>
+              {month.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="date-slot-select"
+          value={parts.year}
+          onChange={(e) => onChange(updateDateValue(value, "year", e.target.value))}
+        >
+          {yearOptions.map((year) => (
+            <option key={year} value={year}>
+              {year}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  };
+
   const accountMapById = useMemo(() => {
     const map = new Map();
     accounts.forEach((acc) => map.set(acc.id, acc));
@@ -1922,6 +2017,11 @@ function App() {
             <button
               className="sheet-button"
               onClick={() => {
+                const today = formatDateInput(new Date());
+                setCustomRangeDraft((prev) => ({
+                  from: prev.from || today,
+                  to: prev.to || today,
+                }));
                 setShowCustomRange(true);
               }}
             >
@@ -1929,22 +2029,28 @@ function App() {
             </button>
             {showCustomRange && (
               <div className="sheet-range">
-                <input
-                  className="input"
-                  type="date"
-                  value={customRangeDraft.from}
-                  onChange={(e) =>
-                    setCustomRangeDraft((prev) => ({ ...prev, from: e.target.value }))
-                  }
-                />
-                <input
-                  className="input"
-                  type="date"
-                  value={customRangeDraft.to}
-                  onChange={(e) =>
-                    setCustomRangeDraft((prev) => ({ ...prev, to: e.target.value }))
-                  }
-                />
+                <div className="sheet-range-row">
+                  <div className="sheet-field">
+                    <div className="sheet-label">С</div>
+                    <DateSlotPicker
+                      value={customRangeDraft.from}
+                      ariaLabel="Начало периода"
+                      onChange={(value) =>
+                        setCustomRangeDraft((prev) => ({ ...prev, from: value }))
+                      }
+                    />
+                  </div>
+                  <div className="sheet-field">
+                    <div className="sheet-label">По</div>
+                    <DateSlotPicker
+                      value={customRangeDraft.to}
+                      ariaLabel="Конец периода"
+                      onChange={(value) =>
+                        setCustomRangeDraft((prev) => ({ ...prev, to: value }))
+                      }
+                    />
+                  </div>
+                </div>
                 <button
                   className="btn"
                   onClick={() => {

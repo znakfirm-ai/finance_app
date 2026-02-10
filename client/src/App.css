@@ -51,6 +51,7 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .label {
@@ -64,14 +65,22 @@
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #d1d5db;
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   box-sizing: border-box;
+  display: block;
 }
 
 .select {
   box-sizing: border-box;
   max-width: 100%;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  font-size: 16px;
+  display: block;
 }
 
 .input:focus {
@@ -1045,6 +1054,45 @@
   min-width: 0;
 }
 
+.sheet-range-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+.sheet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sheet-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.date-slot {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 6px;
+  width: 100%;
+}
+
+.date-slot-select {
+  width: 100%;
+  padding: 8px 8px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  font-size: 14px;
+  text-align: center;
+  box-sizing: border-box;
+  min-height: 38px;
+}
+
 @media (max-width: 640px) {
   .page {
     padding: 24px 12px 40px;
@@ -1052,6 +1100,12 @@
 
   .header h1 {
     font-size: 24px;
+  }
+
+  .input,
+  .select,
+  .date-slot-select {
+    font-size: 16px;
   }
 
   .nav {
