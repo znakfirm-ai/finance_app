@@ -429,7 +429,7 @@ async function getEditableOperation(opId, ownerId) {
   return getOperationById(opId, ownerId);
 }
 
-async function sendEditPreview(chatId, ownerId, op) {
+async function sendEditPreview(chatId, ownerId, op, context = {}) {
   const existing = pendingEditConfirm.get(op.id);
   if (existing?.previewMessageId) {
     await safeDeleteMessage(chatId, existing.previewMessageId);
@@ -457,6 +457,7 @@ async function sendEditPreview(chatId, ownerId, op) {
     ownerId,
     chatId,
     previewMessageId: previewMessage?.message_id,
+    sourceUserMessageId: context.sourceUserMessageId || existing?.sourceUserMessageId,
   });
 }
 
@@ -1574,6 +1575,7 @@ app.post("/telegram/webhook", (req, res) => {
             return;
           }
           await updateOperation(staged.op, ownerId);
+          await safeDeleteMessage(chatId, staged.sourceUserMessageId);
           pendingEditConfirm.delete(opId);
           const messageText =
             `${staged.op.labelEmoji} ${staged.op.label}\n` +
@@ -1856,7 +1858,9 @@ app.post("/telegram/webhook", (req, res) => {
         pendingEdits.delete(chatId);
         await safeDeleteMessage(chatId, editContext.promptMessageId);
         await safeDeleteMessage(chatId, message.message_id);
-        await sendEditPreview(chatId, effectiveOwnerId, op);
+        await sendEditPreview(chatId, effectiveOwnerId, op, {
+          sourceUserMessageId: message.message_id,
+        });
         return;
       }
 
