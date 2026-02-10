@@ -107,6 +107,19 @@ function App() {
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [editingAccountName, setEditingAccountName] = useState("");
   const [accountEditor, setAccountEditor] = useState(null);
+  const [accountDetail, setAccountDetail] = useState(null);
+  const [operationEditor, setOperationEditor] = useState(null);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyPeriod, setHistoryPeriod] = useState("month");
+  const [customRange, setCustomRange] = useState({ from: "", to: "" });
+  const [customRangeDraft, setCustomRangeDraft] = useState({ from: "", to: "" });
+  const [showPeriodSheet, setShowPeriodSheet] = useState(false);
+  const [showCustomRange, setShowCustomRange] = useState(false);
+  const [historyItems, setHistoryItems] = useState([]);
+  const [historyBefore, setHistoryBefore] = useState(null);
+  const [historyHasMore, setHistoryHasMore] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyListRef = useRef(null);
   const balanceScrollRef = useRef(null);
   const [showBalanceLeft, setShowBalanceLeft] = useState(false);
   const [showBalanceRight, setShowBalanceRight] = useState(false);
@@ -181,6 +194,43 @@ function App() {
     } catch (_) {}
   }
 
+  async function loadAccountHistory(reset = true) {
+    if (!accountDetail) return;
+    if (historyLoading) return;
+    setHistoryLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("limit", "50");
+      params.set("account", accountDetail.name);
+      if (!reset && historyBefore) {
+        params.set("before", historyBefore);
+      }
+      const range = getPeriodRange();
+      if (range) {
+        params.set("from", range.start.toISOString());
+        params.set("to", range.end.toISOString());
+      }
+      const res = await fetch(apiUrl(withWebQuery(`/api/operations?${params}`)), {
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : [];
+      if (reset) {
+        setHistoryItems(items);
+      } else {
+        setHistoryItems((prev) => [...prev, ...items]);
+      }
+      const last = items[items.length - 1];
+      setHistoryBefore(last ? last.createdAt || last.created_at || null : null);
+      setHistoryHasMore(items.length === 50);
+    } catch (_) {
+      if (reset) setHistoryItems([]);
+      setHistoryHasMore(false);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
   async function loadSettings() {
     try {
       const res = await fetch(apiUrl(withWebQuery("/api/settings")), {
@@ -216,12 +266,90 @@ function App() {
       setAccountEditor(null);
       setEditingAccountId(null);
       setEditingAccountName("");
+      setAccountDetail(null);
+      setOperationEditor(null);
     }
   }, [view]);
+
+  useEffect(() => {
+    if (!accountDetail) return;
+    setHistoryBefore(null);
+    setHistoryHasMore(true);
+    setHistoryQuery("");
+    setHistoryPeriod("month");
+    setCustomRange({ from: "", to: "" });
+    setCustomRangeDraft({ from: "", to: "" });
+    setShowCustomRange(false);
+  }, [accountDetail?.id, initData, webUserId]);
+
+  useEffect(() => {
+    if (!accountDetail) return;
+    setHistoryBefore(null);
+    setHistoryHasMore(true);
+    loadAccountHistory(true);
+  }, [historyPeriod, customRange.from, customRange.to, accountDetail?.id, initData, webUserId]);
 
   const currencySymbolByCode = (code) => {
     const entry = currencyOptions.find((c) => c.code === code);
     return entry?.symbol || settings.currencySymbol || "₽";
+  };
+
+  const startOfDay = (date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+
+  const endOfDay = (date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+
+  const getPeriodRange = () => {
+    if (historyPeriod === "all") return null;
+    const now = new Date();
+    let start = null;
+    let end = endOfDay(now);
+    if (historyPeriod === "today") {
+      start = startOfDay(now);
+    } else if (historyPeriod === "week") {
+      const day = now.getDay();
+      const diff = (day + 6) % 7;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - diff);
+      start = startOfDay(monday);
+    } else if (historyPeriod === "month") {
+      start = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+    } else if (historyPeriod === "quarter") {
+      const quarterStart = Math.floor(now.getMonth() / 3) * 3;
+      start = startOfDay(new Date(now.getFullYear(), quarterStart, 1));
+    } else if (historyPeriod === "year") {
+      start = startOfDay(new Date(now.getFullYear(), 0, 1));
+    } else if (historyPeriod === "custom" && customRange.from) {
+      const [y, m, d] = customRange.from.split("-").map(Number);
+      if (y && m && d) {
+        start = startOfDay(new Date(y, m - 1, d));
+      }
+      if (customRange.to) {
+        const [ty, tm, td] = customRange.to.split("-").map(Number);
+        if (ty && tm && td) {
+          end = endOfDay(new Date(ty, tm - 1, td));
+        }
+      }
+    }
+    if (!start || Number.isNaN(start.getTime())) return null;
+    if (!end || Number.isNaN(end.getTime())) return null;
+    if (end < start) {
+      const temp = start;
+      start = end;
+      end = temp;
+    }
+    return { start, end };
+  };
+
+  const formatDateInput = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   };
 
   const accountMapById = useMemo(() => {
@@ -443,6 +571,37 @@ function App() {
     }
   }
 
+  async function updateOperationEntry(entry) {
+    try {
+      const payload = {
+        label: entry.label,
+        amount: entry.amount,
+        account: entry.account,
+        category: entry.category,
+      };
+      if (entry.date) payload.date = entry.date;
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(withWebQuery(`/api/operations/${entry.id}`)), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setOperations((prev) =>
+        prev.map((op) => (op.id === data.id ? { ...op, ...data } : op))
+      );
+      setOperationEditor(null);
+      await loadOperations();
+      if (accountDetail) {
+        await loadAccountHistory(true);
+      }
+    } catch (e) {
+      setError(e.message || "Ошибка обновления операции");
+    }
+  }
+
   const totalsByCategory = useMemo(() => {
     const totals = {};
     operations.forEach((op) => {
@@ -531,6 +690,78 @@ function App() {
     [accountSummaries]
   );
 
+  const historyPeriodLabel =
+    historyPeriod === "today"
+      ? "Сегодня"
+      : historyPeriod === "week"
+        ? "Неделя"
+        : historyPeriod === "month"
+          ? "Месяц"
+          : historyPeriod === "quarter"
+            ? "Квартал"
+            : historyPeriod === "year"
+              ? "Год"
+              : historyPeriod === "custom"
+                ? "Свой период"
+                : "Все время";
+
+  const periodRange = useMemo(() => getPeriodRange(), [
+    historyPeriod,
+    customRange.from,
+    customRange.to,
+  ]);
+
+  const periodRangeText = useMemo(() => {
+    if (!periodRange) return "";
+    const fmt = new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    return `Период: ${fmt.format(periodRange.start)} - ${fmt.format(periodRange.end)}`;
+  }, [periodRange]);
+
+  const filteredHistory = useMemo(() => {
+    let items = historyItems;
+    if (periodRange) {
+      items = items.filter((op) => {
+        const opDate = new Date(op.createdAt || op.date || op.created_at);
+        if (Number.isNaN(opDate.getTime())) return true;
+        return opDate >= periodRange.start && opDate <= periodRange.end;
+      });
+    }
+    const q = historyQuery.trim().toLowerCase();
+    if (q) {
+      items = items.filter((op) => {
+        const label = String(op.label || op.text || "").toLowerCase();
+        const amount = String(op.amount || op.amountText || "");
+        return label.includes(q) || amount.includes(q);
+      });
+    }
+    return items;
+  }, [historyItems, historyPeriod, customRange.from, customRange.to, historyQuery]);
+
+  const groupedHistory = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const groups = [];
+    let currentKey = null;
+    filteredHistory.forEach((op) => {
+      const date = new Date(op.createdAt || op.date || op.created_at);
+      const key = Number.isNaN(date.getTime()) ? "Без даты" : fmt.format(date);
+      if (key !== currentKey) {
+        currentKey = key;
+        groups.push({ key, items: [op] });
+      } else {
+        groups[groups.length - 1].items.push(op);
+      }
+    });
+    return groups;
+  }, [filteredHistory]);
+
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
   const incomePages = Math.max(1, Math.ceil(incomeByCategory.length / 4));
 
@@ -540,6 +771,20 @@ function App() {
     const maxScroll = el.scrollWidth - el.clientWidth;
     setShowBalanceLeft(el.scrollLeft > 6);
     setShowBalanceRight(el.scrollLeft < maxScroll - 6);
+  };
+
+  const handleHistoryScroll = () => {
+    const el = historyListRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
+    if (
+      nearBottom &&
+      historyHasMore &&
+      !historyLoading &&
+      !historyQuery
+    ) {
+      loadAccountHistory(false);
+    }
   };
 
   const scrollBalanceBy = (direction) => {
@@ -620,6 +865,104 @@ function App() {
   };
 
   const content = (() => {
+    if (operationEditor) {
+      const isIncome = operationEditor.type === "income";
+      const labelTitle = isIncome ? "Источник дохода" : "Наименование";
+      return (
+        <section className="card">
+          <div className="section-title">
+            <button
+              className="link"
+              onClick={() => {
+                setOperationEditor(null);
+              }}
+            >
+              ← Назад
+            </button>
+            <h2>Операция</h2>
+          </div>
+          <label className="label">{labelTitle}</label>
+          <input
+            className="input"
+            value={operationEditor.label}
+            onChange={(e) =>
+              setOperationEditor((prev) => ({ ...prev, label: e.target.value }))
+            }
+            placeholder="Например: кофе"
+          />
+          <label className="label">Дата операции</label>
+          <input
+            className="input"
+            type="date"
+            value={operationEditor.date || ""}
+            onChange={(e) =>
+              setOperationEditor((prev) => ({ ...prev, date: e.target.value }))
+            }
+          />
+          <label className="label">Сумма</label>
+          <input
+            className="input"
+            type="number"
+            step="0.01"
+            value={operationEditor.amount}
+            onChange={(e) =>
+              setOperationEditor((prev) => ({
+                ...prev,
+                amount: e.target.value,
+              }))
+            }
+          />
+          <label className="label">{isIncome ? "На какой счет" : "Счет"}</label>
+          <select
+            className="select"
+            value={operationEditor.account}
+            onChange={(e) =>
+              setOperationEditor((prev) => ({ ...prev, account: e.target.value }))
+            }
+          >
+            {accounts.map((acc) => (
+              <option key={acc.id} value={acc.name}>
+                {acc.name}
+              </option>
+            ))}
+          </select>
+          <label className="label">Категория</label>
+          <select
+            className="select"
+            value={operationEditor.category}
+            onChange={(e) =>
+              setOperationEditor((prev) => ({ ...prev, category: e.target.value }))
+            }
+          >
+            {categories.map((cat) => (
+              <option key={cat.id} value={cat.name}>
+                {cat.name}
+              </option>
+            ))}
+          </select>
+          <div className="row">
+            <button
+              className="btn"
+              onClick={() =>
+                updateOperationEntry({
+                  id: operationEditor.id,
+                  label: operationEditor.label,
+                  amount: operationEditor.amount,
+                  account: operationEditor.account,
+                  category: operationEditor.category,
+                  date: operationEditor.date,
+                })
+              }
+            >
+              Сохранить
+            </button>
+            <button className="btn ghost" onClick={() => setOperationEditor(null)}>
+              Отмена
+            </button>
+          </div>
+        </section>
+      );
+    }
     if (view === "category" && selectedCategory) {
       return (
         <section className="card">
@@ -850,6 +1193,110 @@ function App() {
         </div>
       ) : null;
 
+      if (accountEditorView) {
+        return <section className="overview-shell">{accountEditorView}</section>;
+      }
+
+      if (accountDetail) {
+        return (
+          <section className="overview-shell">
+            <div className="overview-manage-header">
+              <div className="overview-manage-title">{accountDetail.name}</div>
+              <button className="btn ghost" onClick={() => setAccountDetail(null)}>
+                Закрыть
+              </button>
+            </div>
+            <div className="row">
+              <input
+                className="input"
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Поиск по названию или сумме"
+              />
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setCustomRangeDraft(customRange);
+                  setShowCustomRange(historyPeriod === "custom");
+                  setShowPeriodSheet(true);
+                }}
+              >
+                {historyPeriodLabel}
+              </button>
+            </div>
+            {periodRangeText && (
+              <div className="history-range">{periodRangeText}</div>
+            )}
+            <div className="history-list" ref={historyListRef} onScroll={handleHistoryScroll}>
+              {groupedHistory.length === 0 ? (
+                <div className="muted">Пока нет операций</div>
+              ) : (
+                groupedHistory.map((group) => (
+                  <div key={group.key} className="history-group">
+                    <div className="history-date">{group.key}</div>
+                    <div className="history-rows">
+                      {group.items.map((op) => (
+                        <button
+                          key={op.id}
+                          className="history-row"
+                          onClick={() =>
+                            setOperationEditor({
+                              id: op.id,
+                              label: op.label || op.text || "",
+                              amount: op.amount,
+                              account: op.account,
+                              category: op.category || "Другое",
+                              type: op.type,
+                              date: formatDateInput(
+                                op.createdAt || op.date || op.created_at || ""
+                              ),
+                            })
+                          }
+                        >
+                          <div className="history-row-main">
+                            <span className="history-emoji">
+                              {op.labelEmoji || "🧾"}
+                            </span>
+                            <span className="history-label">{op.label || op.text}</span>
+                          </div>
+                          <div className="history-amount">
+                            {formatMoney(
+                              op.amount,
+                              currencySymbolByCode(
+                                accountDetail.currencyCode || settings.currencyCode
+                              )
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+              {historyLoading && <div className="muted">Загрузка...</div>}
+            </div>
+            <button
+              className="btn"
+              onClick={() => {
+                setAccountEditor({
+                  mode: "edit",
+                  id: accountDetail.id,
+                  name: accountDetail.name,
+                  originalName: accountDetail.name,
+                  currencyCode: accountDetail.currencyCode || settings.currencyCode,
+                  color: accountDetail.color || "#0f172a",
+                  includeInBalance: accountDetail.includeInBalance !== false,
+                });
+                setEditingAccountId(accountDetail.id);
+                setEditingAccountName(accountDetail.name);
+              }}
+            >
+              Редактировать счет
+            </button>
+          </section>
+        );
+      }
+
       return (
         <section className="overview-shell">
           <div className="overview-header">
@@ -880,23 +1327,17 @@ function App() {
                   key={acc.key}
                   className="overview-tile"
                   onClick={() => {
-                    if (accountEditor?.mode === "edit" && accountEditor.id === acc.key) {
-                      setAccountEditor(null);
-                      setEditingAccountId(null);
-                      setEditingAccountName("");
+                    if (accountDetail?.id === acc.key) {
+                      setAccountDetail(null);
                       return;
                     }
-                    setAccountEditor({
-                      mode: "edit",
+                    setAccountDetail({
                       id: acc.key,
                       name: acc.label,
-                      originalName: acc.label,
                       currencyCode: acc.currencyCode || settings.currencyCode,
                       color: acc.color || "#0f172a",
                       includeInBalance: acc.includeInBalance !== false,
                     });
-                    setEditingAccountId(acc.key);
-                    setEditingAccountName(acc.label);
                   }}
                   style={{ background: acc.color || "#0f172a", color: "#fff" }}
                 >
@@ -1262,7 +1703,120 @@ function App() {
       )}
 
       <main className="content">{content}</main>
-      {!accountEditor && (
+      {showPeriodSheet && (
+        <div
+          className="sheet-backdrop"
+          onClick={() => {
+            setShowPeriodSheet(false);
+            setShowCustomRange(false);
+          }}
+        >
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-title">Период</div>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setHistoryPeriod("all");
+                setShowCustomRange(false);
+                setShowPeriodSheet(false);
+              }}
+            >
+              Все время
+            </button>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setHistoryPeriod("today");
+                setShowCustomRange(false);
+                setShowPeriodSheet(false);
+              }}
+            >
+              Сегодня
+            </button>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setHistoryPeriod("week");
+                setShowCustomRange(false);
+                setShowPeriodSheet(false);
+              }}
+            >
+              Неделя
+            </button>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setHistoryPeriod("month");
+                setShowCustomRange(false);
+                setShowPeriodSheet(false);
+              }}
+            >
+              Месяц
+            </button>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setHistoryPeriod("quarter");
+                setShowCustomRange(false);
+                setShowPeriodSheet(false);
+              }}
+            >
+              Квартал
+            </button>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setHistoryPeriod("year");
+                setShowCustomRange(false);
+                setShowPeriodSheet(false);
+              }}
+            >
+              Год
+            </button>
+            <button
+              className="sheet-button"
+              onClick={() => {
+                setShowCustomRange(true);
+              }}
+            >
+              Свой период
+            </button>
+            {showCustomRange && (
+              <div className="sheet-range">
+                <input
+                  className="input"
+                  type="date"
+                  value={customRangeDraft.from}
+                  onChange={(e) =>
+                    setCustomRangeDraft((prev) => ({ ...prev, from: e.target.value }))
+                  }
+                />
+                <input
+                  className="input"
+                  type="date"
+                  value={customRangeDraft.to}
+                  onChange={(e) =>
+                    setCustomRangeDraft((prev) => ({ ...prev, to: e.target.value }))
+                  }
+                />
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setCustomRange(customRangeDraft);
+                    setHistoryPeriod("custom");
+                    setShowCustomRange(false);
+                    setShowPeriodSheet(false);
+                  }}
+                  disabled={!customRangeDraft.from}
+                >
+                  Применить
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {!accountEditor && !operationEditor && (
         <nav className="quick-actions">
           <button
             className={quickActive.home ? "quick-card active" : "quick-card"}

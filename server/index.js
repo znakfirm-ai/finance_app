@@ -279,12 +279,43 @@ async function saveOperation(operation) {
   return operation;
 }
 
-async function listOperations(limit = 100, telegramUserId = null) {
+async function listOperations({
+  limit = 100,
+  telegramUserId = null,
+  account = null,
+  before = null,
+  from = null,
+  to = null,
+} = {}) {
   if (!dbPool) {
-    const data = telegramUserId
+    let data = telegramUserId
       ? memoryOperations.filter((op) => String(op.telegramUserId) === String(telegramUserId))
       : memoryOperations;
-    return data.slice(0, limit);
+    if (account) {
+      data = data.filter((op) => op.account === account);
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (!Number.isNaN(fromDate.getTime())) {
+        data = data.filter((op) => new Date(op.createdAt) >= fromDate);
+      }
+    }
+    if (to) {
+      const toDate = new Date(to);
+      if (!Number.isNaN(toDate.getTime())) {
+        data = data.filter((op) => new Date(op.createdAt) <= toDate);
+      }
+    }
+    if (before) {
+      const beforeDate = new Date(before);
+      if (!Number.isNaN(beforeDate.getTime())) {
+        data = data.filter((op) => new Date(op.createdAt) < beforeDate);
+      }
+    }
+    return data
+      .slice()
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, limit);
   }
   let query = `
     SELECT id, text, type, amount, amount_cents, category, account, account_specified,
@@ -293,9 +324,29 @@ async function listOperations(limit = 100, telegramUserId = null) {
     FROM operations
   `;
   const params = [];
+  const where = [];
   if (telegramUserId) {
     params.push(String(telegramUserId));
-    query += ` WHERE telegram_user_id = $${params.length}`;
+    where.push(`telegram_user_id = $${params.length}`);
+  }
+  if (account) {
+    params.push(account);
+    where.push(`account = $${params.length}`);
+  }
+  if (from) {
+    params.push(from);
+    where.push(`created_at >= $${params.length}`);
+  }
+  if (to) {
+    params.push(to);
+    where.push(`created_at <= $${params.length}`);
+  }
+  if (before) {
+    params.push(before);
+    where.push(`created_at < $${params.length}`);
+  }
+  if (where.length) {
+    query += ` WHERE ${where.join(" AND ")}`;
   }
   params.push(limit);
   query += ` ORDER BY created_at DESC LIMIT $${params.length}`;
@@ -2053,7 +2104,26 @@ app.get("/api/operations", async (req, res) => {
     }
     const settings = await getUserSettings(owner.ownerId);
     const currencySymbol = getCurrencySymbol(settings.currencyCode);
-    const data = await listOperations(200, owner.ownerId);
+    const limitRaw = Number(req.query?.limit || 200);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200;
+    const account = req.query?.account ? String(req.query.account) : null;
+    const parseDateParam = (value) => {
+      if (!value) return null;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return date.toISOString();
+    };
+    const before = parseDateParam(req.query?.before);
+    const from = parseDateParam(req.query?.from);
+    const to = parseDateParam(req.query?.to);
+    const data = await listOperations({
+      limit,
+      telegramUserId: owner.ownerId,
+      account,
+      before,
+      from,
+      to,
+    });
     const withCurrency = data.map((op) => ({
       ...op,
       amountText: formatAmount(op.amount, currencySymbol),
@@ -2062,6 +2132,155 @@ app.get("/api/operations", async (req, res) => {
   } catch (err) {
     console.error("Load operations failed:", err?.message || err);
     res.status(500).json({ error: "Failed to load operations" });
+  }
+});
+
+app.put("/api/operations/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const labelInput = String(req.body?.label || "").trim();
+    const category = String(req.body?.category || "").trim();
+    const account = String(req.body?.account || "").trim();
+    const amountValue = Number(req.body?.amount);
+    const dateInput = String(req.body?.date || "").trim();
+    if (!id || !category || !account || !Number.isFinite(amountValue)) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const existing = await getOperationById(id, owner.ownerId);
+    if (!existing) {
+      return res.status(404).json({ error: "Operation not found" });
+    }
+    const settings = await getUserSettings(owner.ownerId);
+    const currencySymbol = getCurrencySymbol(settings.currencyCode);
+    const label = labelInput || existing.label || existing.text || "Операция";
+    const labelEmoji = pickLabelEmoji(label);
+    const amountCents = Math.round(amountValue * 100);
+    const flowLine =
+      existing.type === "income"
+        ? `📉 Доход: ${account}`
+        : `📈 Расход: ${account}`;
+    const amountText = formatAmount(amountValue, currencySymbol);
+    const parseDateOnly = (value) => {
+      if (!value) return null;
+      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        const year = Number(match[1]);
+        const month = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        return new Date(Date.UTC(year, month, day, 12, 0, 0));
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return date;
+    };
+    const createdAt = dateInput ? parseDateOnly(dateInput) : null;
+
+    if (!dbPool) {
+      const idx = memoryOperations.findIndex(
+        (op) =>
+          op.id === id &&
+          String(op.telegramUserId || "") === String(owner.ownerId || "")
+      );
+      if (idx === -1) return res.status(404).json({ error: "Operation not found" });
+      const updated = {
+        ...memoryOperations[idx],
+        text: label,
+        amount: amountValue,
+        amountCents,
+        category,
+        account,
+        accountSpecified: true,
+        label,
+        labelEmoji,
+        amountText,
+        flowLine,
+        createdAt: createdAt || memoryOperations[idx].createdAt,
+      };
+      memoryOperations[idx] = updated;
+      return res.json(updated);
+    }
+
+    const setParts = [
+      "text=$1",
+      "type=$2",
+      "amount=$3",
+      "amount_cents=$4",
+      "category=$5",
+      "account=$6",
+      "account_specified=$7",
+      "label=$8",
+      "label_emoji=$9",
+      "amount_text=$10",
+      "flow_line=$11",
+    ];
+    const values = [
+      label,
+      existing.type,
+      amountValue,
+      amountCents,
+      category,
+      account,
+      true,
+      label,
+      labelEmoji,
+      amountText,
+      flowLine,
+    ];
+    if (createdAt) {
+      values.push(createdAt);
+      setParts.push(`created_at=$${values.length}`);
+    }
+    values.push(id, owner.ownerId);
+    const idPos = values.length - 1;
+    const ownerPos = values.length;
+    const result = await dbPool.query(
+      `
+      UPDATE operations
+      SET ${setParts.join(", ")}
+      WHERE id = $${idPos} AND telegram_user_id = $${ownerPos}
+      RETURNING id, text, type, amount, amount_cents, category, account, account_specified,
+                telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
+                source_message_id
+    `,
+      values
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Operation not found" });
+    }
+    const row = result.rows[0];
+    res.json({
+      id: row.id,
+      text: row.text,
+      type: row.type,
+      amount:
+        row.amount_cents !== null && row.amount_cents !== undefined
+          ? Number(row.amount_cents) / 100
+          : Number(row.amount),
+      amountCents:
+        row.amount_cents !== null && row.amount_cents !== undefined
+          ? Number(row.amount_cents)
+          : Math.round(Number(row.amount) * 100),
+      category: row.category,
+      account: row.account,
+      accountSpecified: row.account_specified,
+      telegramUserId: row.telegram_user_id,
+      createdAt: row.created_at,
+      label: row.label,
+      labelEmoji: row.label_emoji,
+      amountText: row.amount_text,
+      flowLine: row.flow_line,
+      sourceMessageId: row.source_message_id,
+    });
+  } catch (err) {
+    console.error("Update operation failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update operation" });
   }
 });
 
