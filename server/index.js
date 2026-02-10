@@ -313,6 +313,50 @@ async function listOperations(limit = 100, telegramUserId = null) {
   }));
 }
 
+async function getOperationById(operationId, telegramUserId) {
+  if (!dbPool) {
+    return (
+      memoryOperations.find(
+        (op) =>
+          op.id === operationId &&
+          String(op.telegramUserId || "") === String(telegramUserId || "")
+      ) || null
+    );
+  }
+  const result = await dbPool.query(
+    `SELECT id, text, type, amount, amount_cents, category, account, account_specified,
+            telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
+     FROM operations
+     WHERE id = $1 AND telegram_user_id = $2
+     LIMIT 1`,
+    [operationId, telegramUserId || null]
+  );
+  if (!result.rows.length) return null;
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    text: row.text,
+    type: row.type,
+    amount:
+      row.amount_cents !== null && row.amount_cents !== undefined
+        ? Number(row.amount_cents) / 100
+        : Number(row.amount),
+    amountCents:
+      row.amount_cents !== null && row.amount_cents !== undefined
+        ? Number(row.amount_cents)
+        : Math.round(Number(row.amount) * 100),
+    category: row.category,
+    account: row.account,
+    accountSpecified: row.account_specified,
+    telegramUserId: row.telegram_user_id,
+    createdAt: row.created_at,
+    label: row.label,
+    labelEmoji: row.label_emoji,
+    amountText: row.amount_text,
+    flowLine: row.flow_line,
+  };
+}
+
 async function updateOperation(operation, telegramUserId) {
   if (!dbPool) {
     const idx = memoryOperations.findIndex(
@@ -1389,6 +1433,143 @@ app.post("/telegram/webhook", (req, res) => {
         const data = cq.data || "";
         if (!chatId) return;
 
+        if (data.startsWith("editfield:")) {
+          const [_, field, opId] = data.split(":");
+          const ownerId = cq.from?.id ? String(cq.from.id) : null;
+          if (!opId || !ownerId) {
+            await telegramApi("answerCallbackQuery", { callback_query_id: cq.id });
+            return;
+          }
+          if (field === "account") {
+            const accountsList = await getAccountsForOwner(ownerId);
+            await telegramApi("answerCallbackQuery", {
+              callback_query_id: cq.id,
+            });
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Выбери счет:",
+              reply_markup: {
+                inline_keyboard: [
+                  accountsList.map((acc) => ({
+                    text: acc.name,
+                    callback_data: `setaccount:${opId}:${acc.name}`,
+                  })),
+                ],
+              },
+            });
+            return;
+          }
+          if (field === "category") {
+            const categoriesList = await getCategoriesForOwner(ownerId);
+            await telegramApi("answerCallbackQuery", {
+              callback_query_id: cq.id,
+            });
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Выбери категорию:",
+              reply_markup: {
+                inline_keyboard: [
+                  categoriesList.map((cat) => ({
+                    text: cat.name,
+                    callback_data: `setcategory:${opId}:${cat.name}`,
+                  })),
+                ],
+              },
+            });
+            return;
+          }
+          pendingEdits.set(chatId, { opId, ownerId, field });
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          const prompt =
+            field === "name"
+              ? "Напиши новое наименование."
+              : "Напиши новую сумму, например: 450 или 450.50";
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: prompt,
+          });
+          return;
+        }
+        if (data.startsWith("setaccount:")) {
+          const parts = data.split(":");
+          const opId = parts[1];
+          const accountName = parts.slice(2).join(":");
+          const ownerId = cq.from?.id ? String(cq.from.id) : null;
+          const op = await getOperationById(opId, ownerId);
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          if (!op) {
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Не удалось найти операцию.",
+            });
+            return;
+          }
+          const settings = await getUserSettings(ownerId);
+          op.account = accountName;
+          op.accountSpecified = true;
+          op.amountText = formatAmount(op.amount, getCurrencySymbol(settings.currencyCode));
+          op.flowLine = op.type === "income" ? `📉 Доход: ${op.account}` : `📈 Расход: ${op.account}`;
+          await updateOperation(op, ownerId);
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text:
+              `${op.labelEmoji} ${op.label}\n` +
+              `💸 ${op.amountText}\n` +
+              `${op.flowLine}\n` +
+              `🗂️ Категория: ${op.category}`,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
+                  { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
+                ],
+              ],
+            },
+          });
+          return;
+        }
+        if (data.startsWith("setcategory:")) {
+          const parts = data.split(":");
+          const opId = parts[1];
+          const categoryName = parts.slice(2).join(":");
+          const ownerId = cq.from?.id ? String(cq.from.id) : null;
+          const op = await getOperationById(opId, ownerId);
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          if (!op) {
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Не удалось найти операцию.",
+            });
+            return;
+          }
+          const settings = await getUserSettings(ownerId);
+          op.category = categoryName;
+          op.amountText = formatAmount(op.amount, getCurrencySymbol(settings.currencyCode));
+          await updateOperation(op, ownerId);
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text:
+              `${op.labelEmoji} ${op.label}\n` +
+              `💸 ${op.amountText}\n` +
+              `${op.flowLine}\n` +
+              `🗂️ Категория: ${op.category}`,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
+                  { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
+                ],
+              ],
+            },
+          });
+          return;
+        }
         if (data.startsWith("edit:")) {
           pendingEdits.set(chatId, {
             opId: data.replace("edit:", "").trim(),
@@ -1399,9 +1580,19 @@ app.post("/telegram/webhook", (req, res) => {
           });
           await telegramApi("sendMessage", {
             chat_id: chatId,
-            text:
-              "Отправь правильную формулировку, например: " +
-              '"Кофе 400 рублей, оплата картой".',
+            text: "Что исправить?",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "Наименование", callback_data: `editfield:name:${data.replace("edit:", "").trim()}` },
+                  { text: "Сумма", callback_data: `editfield:amount:${data.replace("edit:", "").trim()}` },
+                ],
+                [
+                  { text: "Счет", callback_data: `editfield:account:${data.replace("edit:", "").trim()}` },
+                  { text: "Категория", callback_data: `editfield:category:${data.replace("edit:", "").trim()}` },
+                ],
+              ],
+            },
           });
           return;
         }
@@ -1511,6 +1702,70 @@ app.post("/telegram/webhook", (req, res) => {
         await telegramApi("sendMessage", {
           chat_id: chatId,
           text: "Не удалось распознать сообщение. Попробуй еще раз.",
+        });
+        return;
+      }
+
+      if (editContext?.opId && editContext?.field) {
+        const op = await getOperationById(editContext.opId, effectiveOwnerId);
+        if (!op) {
+          pendingEdits.delete(chatId);
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text: "Не удалось найти операцию.",
+          });
+          return;
+        }
+        const settings = effectiveOwnerId
+          ? await getUserSettings(effectiveOwnerId)
+          : { currencyCode: "RUB" };
+        const currencySymbol = getCurrencySymbol(settings.currencyCode);
+        if (editContext.field === "name") {
+          const labelRaw = String(text || "").trim();
+          if (!labelRaw) {
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Не вижу наименование. Напиши еще раз.",
+            });
+            return;
+          }
+          const label = labelRaw.charAt(0).toUpperCase() + labelRaw.slice(1);
+          op.label = label;
+          op.labelEmoji = pickLabelEmoji(label);
+          op.text = label;
+        }
+        if (editContext.field === "amount") {
+          const amount = parseAmount(text);
+          if (!amount) {
+            await telegramApi("sendMessage", {
+              chat_id: chatId,
+              text: "Не понял сумму. Напиши только цифры, например: 450 или 450.50",
+            });
+            return;
+          }
+          op.amount = amount;
+          op.amountCents = Math.round(amount * 100);
+        }
+        op.amountText = formatAmount(op.amount, currencySymbol);
+        op.flowLine =
+          op.type === "income" ? `📉 Доход: ${op.account}` : `📈 Расход: ${op.account}`;
+        await updateOperation(op, effectiveOwnerId);
+        pendingEdits.delete(chatId);
+        await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text:
+            `${op.labelEmoji} ${op.label}\n` +
+            `💸 ${op.amountText}\n` +
+            `${op.flowLine}\n` +
+            `🗂️ Категория: ${op.category}`,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✏️ Исправить", callback_data: `edit:${op.id}` },
+                { text: "🗑️ Удалить", callback_data: `delete:${op.id}` },
+              ],
+            ],
+          },
         });
         return;
       }
