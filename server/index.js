@@ -17,9 +17,6 @@ const TRANSCRIBE_PROMPT =
 const TELEGRAM_API = process.env.TELEGRAM_BOT_TOKEN
   ? `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`
   : null;
-const TELEGRAM_PARSE_FAIL_GIF =
-  process.env.TELEGRAM_PARSE_FAIL_GIF ||
-  "https://99px.ru/sstorage/86/2016/10/image_862610162033291453361.gif";
 const LEMMATIZE_SCRIPT = path.join(__dirname, "lemmatize.py");
 const DATABASE_URL = process.env.DATABASE_URL || process.env.RENDER_DATABASE_URL;
 const TELEGRAM_INITDATA_MAX_AGE_SEC = 24 * 60 * 60;
@@ -95,7 +92,6 @@ const memoryOperations = [];
 const pendingOperations = new Map();
 const pendingEdits = new Map();
 const pendingEditConfirm = new Map();
-const pendingOnboarding = new Map();
 const operationSourceMessages = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
@@ -522,13 +518,6 @@ async function safeDeleteMessage(chatId, messageId) {
   }
 }
 
-async function clearOnboardingMessages(chatId) {
-  const info = pendingOnboarding.get(chatId);
-  if (!info) return;
-  await safeDeleteMessage(chatId, info.gifMessageId);
-  await safeDeleteMessage(chatId, info.promptMessageId);
-  pendingOnboarding.delete(chatId);
-}
 
 function verifyTelegramInitData(initData) {
   if (!initData || !process.env.TELEGRAM_BOT_TOKEN) {
@@ -1757,23 +1746,6 @@ app.post("/telegram/webhook", (req, res) => {
           pendingOperations.delete(chatId);
           return;
         }
-        if (data === "onboard:yes") {
-          await telegramApi("answerCallbackQuery", {
-            callback_query_id: cq.id,
-          });
-          await safeDeleteMessage(chatId, cq.message?.message_id);
-          const promptMessage = await telegramApi("sendMessage", {
-            chat_id: chatId,
-            text:
-              "Запиши мне голосовое или отправь текстовое сообщение, например: " +
-              '"Кофе 400 рублей, оплата картой".',
-          });
-          pendingOnboarding.set(chatId, {
-            ...(pendingOnboarding.get(chatId) || {}),
-            promptMessageId: promptMessage?.message_id,
-          });
-          return;
-        }
         return;
       }
 
@@ -1802,26 +1774,13 @@ app.post("/telegram/webhook", (req, res) => {
       }
 
       if (message.text && message.text.trim() === "/start") {
-        const gifMessage = await telegramApi("sendAnimation", {
+        await telegramApi("sendMessage", {
           chat_id: chatId,
-          animation: TELEGRAM_PARSE_FAIL_GIF,
-        });
-        const promptMessage = await telegramApi("sendMessage", {
-          chat_id: chatId,
-          text: "👋 Привет! Давай устроим твоим финансам порядок?",
-          reply_markup: {
-            inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
-          },
-        });
-        pendingOnboarding.set(chatId, {
-          gifMessageId: gifMessage?.message_id,
-          promptMessageId: promptMessage?.message_id,
+          text: "Привет! Давай устроим порядок в твоих финансах?",
         });
         await safeDeleteMessage(chatId, message.message_id);
         return;
       }
-
-      await clearOnboardingMessages(chatId);
 
       if (editContext?.opId && editContext?.field) {
         const op = await getEditableOperation(editContext.opId, effectiveOwnerId);
@@ -1883,34 +1842,10 @@ app.post("/telegram/webhook", (req, res) => {
         : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
       const parsed = parseOperation(text, categoriesList, accountsList);
       if (!parsed) {
-        try {
-          const gifMessage = await telegramApi("sendAnimation", {
-            chat_id: chatId,
-            animation: TELEGRAM_PARSE_FAIL_GIF,
-          });
-          pendingOnboarding.set(chatId, {
-            ...(pendingOnboarding.get(chatId) || {}),
-            gifMessageId: gifMessage?.message_id,
-          });
-        } catch (err) {
-          await telegramApi("sendMessage", {
-            chat_id: chatId,
-            text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
-          });
-        }
-        if (!editContext?.opId) {
-          const promptMessage = await telegramApi("sendMessage", {
-            chat_id: chatId,
-            text: "👋 Привет! Давай устроим твоим финансам порядок?",
-            reply_markup: {
-              inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
-            },
-          });
-          pendingOnboarding.set(chatId, {
-            ...(pendingOnboarding.get(chatId) || {}),
-            promptMessageId: promptMessage?.message_id,
-          });
-        }
+        await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
+        });
         return;
       }
       if (effectiveOwnerId) {
