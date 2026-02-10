@@ -988,6 +988,31 @@ function App() {
     }
   }
 
+  async function deleteOperationEntry(entry) {
+    if (!entry?.id) return;
+    if (!confirm("Удалить операцию?")) return;
+    try {
+      const payload = {};
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(withWebQuery(`/api/operations/${entry.id}`)), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setOperations((prev) => prev.filter((op) => op.id !== entry.id));
+      setOperationEditor(null);
+      await loadOperations();
+      if (accountDetail || incomeSourceDetail || categoryDetail) {
+        await loadHistory(true);
+      }
+    } catch (e) {
+      setError(e.message || "Ошибка удаления операции");
+    }
+  }
+
   const totalsByCategory = useMemo(() => {
     const totals = {};
     operations.forEach((op) => {
@@ -1449,6 +1474,14 @@ function App() {
               Отмена
             </button>
           </div>
+          {!isCreate && (
+            <button
+              className="btn danger"
+              onClick={() => deleteOperationEntry(operationEditor)}
+            >
+              Удалить операцию
+            </button>
+          )}
         </section>
       );
     }

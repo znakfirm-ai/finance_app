@@ -2534,6 +2534,30 @@ app.put("/api/operations/:id", async (req, res) => {
   }
 });
 
+app.delete("/api/operations/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const deleted = await deleteOperationById(id, owner.ownerId);
+    if (!deleted) {
+      return res.status(404).json({ error: "Operation not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete operation failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete operation" });
+  }
+});
+
 app.get("/api/categories", async (req, res) => {
   try {
     const owner = getOwnerFromRequest(req);
