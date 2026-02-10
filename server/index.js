@@ -93,7 +93,6 @@ const pendingOperations = new Map();
 const pendingEdits = new Map();
 const pendingEditConfirm = new Map();
 const operationSourceMessages = new Map();
-const onboardingMessages = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
 let dbPool = null;
@@ -138,6 +137,7 @@ async function initDb() {
       account_specified boolean NOT NULL DEFAULT false,
       telegram_user_id text,
       amount_cents integer,
+      source_message_id bigint,
       created_at timestamptz NOT NULL,
       label text,
       label_emoji text,
@@ -157,6 +157,9 @@ async function initDb() {
   );
   await dbPool.query("ALTER TABLE operations ADD COLUMN IF NOT EXISTS amount_cents integer;");
   await dbPool.query(
+    "ALTER TABLE operations ADD COLUMN IF NOT EXISTS source_message_id bigint;"
+  );
+  await dbPool.query(
     "UPDATE operations SET amount_cents = ROUND(amount * 100) WHERE amount_cents IS NULL;"
   );
   await dbPool.query(
@@ -171,6 +174,12 @@ async function initDb() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await dbPool.query(
+    "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS onboarding_greeting_message_id bigint;"
+  );
+  await dbPool.query(
+    "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS onboarding_prompt_message_id bigint;"
+  );
   try {
     await dbPool.query(`
       WITH ranked AS (
@@ -244,9 +253,9 @@ async function saveOperation(operation) {
   const query = `
     INSERT INTO operations (
       id, text, type, amount, amount_cents, category, account, account_specified,
-      telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
+      telegram_user_id, created_at, label, label_emoji, amount_text, flow_line, source_message_id
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
     )
   `;
   const values = [
@@ -264,6 +273,7 @@ async function saveOperation(operation) {
     operation.labelEmoji,
     operation.amountText,
     operation.flowLine,
+    operation.sourceMessageId || null,
   ];
   await dbPool.query(query, values);
   return operation;
@@ -278,7 +288,8 @@ async function listOperations(limit = 100, telegramUserId = null) {
   }
   let query = `
     SELECT id, text, type, amount, amount_cents, category, account, account_specified,
-           telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
+           telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
+           source_message_id
     FROM operations
   `;
   const params = [];
@@ -310,6 +321,7 @@ async function listOperations(limit = 100, telegramUserId = null) {
     labelEmoji: row.label_emoji,
     amountText: row.amount_text,
     flowLine: row.flow_line,
+    sourceMessageId: row.source_message_id,
   }));
 }
 
@@ -325,7 +337,8 @@ async function getOperationById(operationId, telegramUserId) {
   }
   const result = await dbPool.query(
     `SELECT id, text, type, amount, amount_cents, category, account, account_specified,
-            telegram_user_id, created_at, label, label_emoji, amount_text, flow_line
+            telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
+            source_message_id
      FROM operations
      WHERE id = $1 AND telegram_user_id = $2
      LIMIT 1`,
@@ -354,6 +367,7 @@ async function getOperationById(operationId, telegramUserId) {
     labelEmoji: row.label_emoji,
     amountText: row.amount_text,
     flowLine: row.flow_line,
+    sourceMessageId: row.source_message_id,
   };
 }
 
@@ -433,6 +447,7 @@ async function sendEditPreview(chatId, ownerId, op, context = {}) {
     await safeDeleteMessage(chatId, existing.previewMessageId);
   }
   const source = operationSourceMessages.get(op.id);
+  const opSourceId = op.sourceMessageId || null;
   const messageText =
     `${op.labelEmoji} ${op.label}\n` +
     `💸 ${op.amountText}\n` +
@@ -459,6 +474,7 @@ async function sendEditPreview(chatId, ownerId, op, context = {}) {
     sourceUserMessageId:
       context.sourceUserMessageId ||
       existing?.sourceUserMessageId ||
+      opSourceId ||
       source?.messageId ||
       null,
   });
@@ -519,12 +535,19 @@ async function safeDeleteMessage(chatId, messageId) {
   }
 }
 
-async function clearOnboardingMessages(chatId) {
-  const info = onboardingMessages.get(chatId);
-  if (!info) return;
-  await safeDeleteMessage(chatId, info.greetingMessageId);
-  await safeDeleteMessage(chatId, info.promptMessageId);
-  onboardingMessages.delete(chatId);
+async function clearOnboardingMessages(chatId, ownerId) {
+  let greetingId = null;
+  let promptId = null;
+  if (ownerId) {
+    const ids = await getOnboardingMessageIds(ownerId);
+    greetingId = ids.greetingId;
+    promptId = ids.promptId;
+  }
+  if (greetingId) await safeDeleteMessage(chatId, greetingId);
+  if (promptId) await safeDeleteMessage(chatId, promptId);
+  if (ownerId) {
+    await clearOnboardingMessageIds(ownerId);
+  }
 }
 
 
@@ -632,6 +655,53 @@ async function getUserSettings(ownerId) {
     return { currencyCode: inserted.rows[0].currency_code || "RUB" };
   }
   return defaultSettings;
+}
+
+async function getOnboardingMessageIds(ownerId) {
+  if (!ownerId || !dbPool) {
+    return { greetingId: null, promptId: null };
+  }
+  const { rows } = await dbPool.query(
+    `SELECT onboarding_greeting_message_id, onboarding_prompt_message_id
+     FROM user_settings WHERE owner_id = $1 LIMIT 1`,
+    [ownerId]
+  );
+  if (!rows.length) {
+    return { greetingId: null, promptId: null };
+  }
+  return {
+    greetingId: rows[0].onboarding_greeting_message_id || null,
+    promptId: rows[0].onboarding_prompt_message_id || null,
+  };
+}
+
+async function updateOnboardingMessageIds(ownerId, greetingId, promptId) {
+  if (!ownerId || !dbPool) return;
+  await dbPool.query(
+    `
+    INSERT INTO user_settings (owner_id, currency_code, onboarding_greeting_message_id, onboarding_prompt_message_id)
+    VALUES ($1, 'RUB', $2, $3)
+    ON CONFLICT (owner_id) DO UPDATE
+    SET onboarding_greeting_message_id = $2,
+        onboarding_prompt_message_id = $3,
+        updated_at = now()
+  `,
+    [ownerId, greetingId, promptId]
+  );
+}
+
+async function clearOnboardingMessageIds(ownerId) {
+  if (!ownerId || !dbPool) return;
+  await dbPool.query(
+    `
+    UPDATE user_settings
+    SET onboarding_greeting_message_id = NULL,
+        onboarding_prompt_message_id = NULL,
+        updated_at = now()
+    WHERE owner_id = $1
+  `,
+    [ownerId]
+  );
 }
 
 async function updateUserSettings(ownerId, currencyCode) {
@@ -1721,6 +1791,7 @@ app.post("/telegram/webhook", (req, res) => {
             if (pending.editId) {
               await updateOperation(pending.parsed, pending.ownerId);
             } else {
+              pending.parsed.sourceMessageId = pending.sourceUserMessageId;
               await saveOperation(pending.parsed);
               operationSourceMessages.set(pending.parsed.id, {
                 chatId,
@@ -1763,11 +1834,15 @@ app.post("/telegram/webhook", (req, res) => {
             chat_id: chatId,
             text: 'Запиши мне голосовое или отправь текстом "Кофе капучино 200".',
           });
-          const existing = onboardingMessages.get(chatId) || {};
-          onboardingMessages.set(chatId, {
-            ...existing,
-            promptMessageId: promptMessage?.message_id,
-          });
+          if (cq.from?.id) {
+            const ownerId = String(cq.from.id);
+            const ids = await getOnboardingMessageIds(ownerId);
+            await updateOnboardingMessageIds(
+              ownerId,
+              ids.greetingId,
+              promptMessage?.message_id || null
+            );
+          }
           return;
         }
         return;
@@ -1798,7 +1873,7 @@ app.post("/telegram/webhook", (req, res) => {
       }
 
       if (message.text && message.text.trim() === "/start") {
-        await clearOnboardingMessages(chatId);
+        await clearOnboardingMessages(chatId, telegramUserId);
         const greetingMessage = await telegramApi("sendMessage", {
           chat_id: chatId,
           text: "Привет! Давай устроим порядок в твоих финансах?",
@@ -1806,15 +1881,18 @@ app.post("/telegram/webhook", (req, res) => {
             inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
           },
         });
-        onboardingMessages.set(chatId, {
-          greetingMessageId: greetingMessage?.message_id,
-          promptMessageId: null,
-        });
+        if (telegramUserId) {
+          await updateOnboardingMessageIds(
+            telegramUserId,
+            greetingMessage?.message_id || null,
+            null
+          );
+        }
         await safeDeleteMessage(chatId, message.message_id);
         return;
       }
 
-      await clearOnboardingMessages(chatId);
+      await clearOnboardingMessages(chatId, telegramUserId);
 
       if (editContext?.opId && editContext?.field) {
         const op = await getEditableOperation(editContext.opId, effectiveOwnerId);
@@ -1930,6 +2008,7 @@ app.post("/telegram/webhook", (req, res) => {
         if (editContext?.opId) {
           await updateOperation(parsed, effectiveOwnerId);
         } else {
+          parsed.sourceMessageId = message.message_id;
           await saveOperation(parsed);
           operationSourceMessages.set(parsed.id, {
             chatId,
