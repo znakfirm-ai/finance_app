@@ -51,6 +51,7 @@ const defaultCategories = [
 ];
 
 const defaultAccounts = ["Банковская карта", "Наличные"];
+const defaultIncomeSources = ["Зарплата", "Бизнес", "Прочее"];
 const DEFAULT_ACCOUNT_COLOR = "#0f172a";
 
 const currencyOptions = [
@@ -160,10 +161,16 @@ async function initDb() {
     "ALTER TABLE operations ADD COLUMN IF NOT EXISTS source_message_id bigint;"
   );
   await dbPool.query(
+    "ALTER TABLE operations ADD COLUMN IF NOT EXISTS income_source text;"
+  );
+  await dbPool.query(
     "UPDATE operations SET amount_cents = ROUND(amount * 100) WHERE amount_cents IS NULL;"
   );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS operations_telegram_user_id_idx ON operations(telegram_user_id);"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS operations_income_source_idx ON operations(telegram_user_id, income_source);"
   );
 
   await dbPool.query(`
@@ -218,6 +225,18 @@ async function initDb() {
   );
 
   await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS income_sources (
+      id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      name text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS income_sources_owner_id_idx ON income_sources(owner_id);"
+  );
+
+  await dbPool.query(`
     CREATE TABLE IF NOT EXISTS accounts (
       id text PRIMARY KEY,
       owner_id text NOT NULL,
@@ -256,9 +275,10 @@ async function saveOperation(operation) {
   const query = `
     INSERT INTO operations (
       id, text, type, amount, amount_cents, category, account, account_specified,
-      telegram_user_id, created_at, label, label_emoji, amount_text, flow_line, source_message_id
+      telegram_user_id, created_at, label, label_emoji, amount_text, flow_line, source_message_id,
+      income_source
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
     )
   `;
   const values = [
@@ -277,6 +297,7 @@ async function saveOperation(operation) {
     operation.amountText,
     operation.flowLine,
     operation.sourceMessageId || null,
+    operation.incomeSource || null,
   ];
   await dbPool.query(query, values);
   return operation;
@@ -286,6 +307,8 @@ async function listOperations({
   limit = 100,
   telegramUserId = null,
   account = null,
+  type = null,
+  incomeSource = null,
   before = null,
   from = null,
   to = null,
@@ -296,6 +319,12 @@ async function listOperations({
       : memoryOperations;
     if (account) {
       data = data.filter((op) => op.account === account);
+    }
+    if (type) {
+      data = data.filter((op) => op.type === type);
+    }
+    if (incomeSource) {
+      data = data.filter((op) => (op.incomeSource || op.category) === incomeSource);
     }
     if (from) {
       const fromDate = new Date(from);
@@ -323,7 +352,7 @@ async function listOperations({
   let query = `
     SELECT id, text, type, amount, amount_cents, category, account, account_specified,
            telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
-           source_message_id
+           source_message_id, income_source
     FROM operations
   `;
   const params = [];
@@ -335,6 +364,17 @@ async function listOperations({
   if (account) {
     params.push(account);
     where.push(`account = $${params.length}`);
+  }
+  if (type) {
+    params.push(type);
+    where.push(`type = $${params.length}`);
+  }
+  if (incomeSource) {
+    params.push(incomeSource);
+    params.push(incomeSource);
+    where.push(
+      `(income_source = $${params.length - 1} OR (income_source IS NULL AND category = $${params.length}))`
+    );
   }
   if (from) {
     params.push(from);
@@ -376,6 +416,7 @@ async function listOperations({
     amountText: row.amount_text,
     flowLine: row.flow_line,
     sourceMessageId: row.source_message_id,
+    incomeSource: row.income_source || null,
   }));
 }
 
@@ -392,7 +433,7 @@ async function getOperationById(operationId, telegramUserId) {
   const result = await dbPool.query(
     `SELECT id, text, type, amount, amount_cents, category, account, account_specified,
             telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
-            source_message_id
+            source_message_id, income_source
      FROM operations
      WHERE id = $1 AND telegram_user_id = $2
      LIMIT 1`,
@@ -422,6 +463,7 @@ async function getOperationById(operationId, telegramUserId) {
     amountText: row.amount_text,
     flowLine: row.flow_line,
     sourceMessageId: row.source_message_id,
+    incomeSource: row.income_source || null,
   };
 }
 
@@ -445,8 +487,9 @@ async function updateOperation(operation, telegramUserId) {
   const query = `
     UPDATE operations
     SET text=$1, type=$2, amount=$3, amount_cents=$4, category=$5, account=$6,
-        account_specified=$7, label=$8, label_emoji=$9, amount_text=$10, flow_line=$11
-    WHERE id=$12 AND telegram_user_id=$13
+        account_specified=$7, label=$8, label_emoji=$9, amount_text=$10, flow_line=$11,
+        income_source=$12
+    WHERE id=$13 AND telegram_user_id=$14
     RETURNING id
   `;
   const values = [
@@ -461,6 +504,7 @@ async function updateOperation(operation, telegramUserId) {
     operation.labelEmoji,
     operation.amountText,
     operation.flowLine,
+    operation.incomeSource || null,
     operation.id,
     telegramUserId || null,
   ];
@@ -814,6 +858,39 @@ async function getCategoriesForOwner(ownerId) {
         ? []
         : [String(row.name || "").toLowerCase().replace(/ё/g, "е")],
   }));
+}
+
+async function getIncomeSourcesForOwner(ownerId) {
+  if (!ownerId || !dbPool) {
+    return defaultIncomeSources.map((name, index) => ({
+      id: `inc_default_${index}`,
+      name,
+    }));
+  }
+  const { rows } = await dbPool.query(
+    "SELECT id, name FROM income_sources WHERE owner_id = $1 ORDER BY created_at ASC",
+    [ownerId]
+  );
+  if (!rows.length) {
+    const now = Date.now();
+    const values = defaultIncomeSources.map((name, index) => [
+      `inc_${now}_${index}`,
+      ownerId,
+      name,
+    ]);
+    const placeholders = values
+      .map((_, idx) => `($${idx * 3 + 1}, $${idx * 3 + 2}, $${idx * 3 + 3})`)
+      .join(",");
+    await dbPool.query(
+      `INSERT INTO income_sources (id, owner_id, name) VALUES ${placeholders}`,
+      values.flat()
+    );
+    return defaultIncomeSources.map((name, index) => ({
+      id: `inc_${now}_${index}`,
+      name,
+    }));
+  }
+  return rows.map((row) => ({ id: row.id, name: row.name }));
 }
 
 async function getAccountsForOwner(ownerId) {
@@ -1472,7 +1549,8 @@ const expensePatterns = [
 function parseOperation(
   text,
   categoriesList = defaultCategories,
-  accountsList = defaultAccounts
+  accountsList = defaultAccounts,
+  incomeSourcesList = defaultIncomeSources
 ) {
   const raw = String(text || "").trim();
   if (!raw) return null;
@@ -1493,16 +1571,42 @@ function parseOperation(
   }
 
   let category = "Другое";
-  for (const c of categoriesList) {
-    if (c.keywords && c.keywords.some((k) => lower.includes(k))) {
-      category = c.name;
-      break;
+  let incomeSource = null;
+  if (type === "income") {
+    const incomeNames = Array.isArray(incomeSourcesList)
+      ? incomeSourcesList
+          .map((src) => (typeof src === "string" ? src : src?.name))
+          .filter(Boolean)
+      : defaultIncomeSources;
+    const matched = incomeNames.find((name) =>
+      lower.includes(String(name).toLowerCase().replace(/ё/g, "е"))
+    );
+    if (matched) {
+      incomeSource = matched;
+    } else {
+      incomeSource =
+        incomeNames.find((name) =>
+          String(name).toLowerCase().replace(/ё/g, "е").includes("проч")
+        ) ||
+        incomeNames.find((name) =>
+          String(name).toLowerCase().replace(/ё/g, "е").includes("друг")
+        ) ||
+        incomeNames[0] ||
+        "Прочее";
     }
-    if (!c.keywords && c.name && c.name !== "Другое") {
-      const nameLower = String(c.name).toLowerCase().replace(/ё/g, "е");
-      if (nameLower && lower.includes(nameLower)) {
+    category = incomeSource || "Прочее";
+  } else {
+    for (const c of categoriesList) {
+      if (c.keywords && c.keywords.some((k) => lower.includes(k))) {
         category = c.name;
         break;
+      }
+      if (!c.keywords && c.name && c.name !== "Другое") {
+        const nameLower = String(c.name).toLowerCase().replace(/ё/g, "е");
+        if (nameLower && lower.includes(nameLower)) {
+          category = c.name;
+          break;
+        }
       }
     }
   }
@@ -1539,6 +1643,7 @@ function parseOperation(
     category,
     account,
     accountSpecified,
+    incomeSource,
     createdAt: new Date().toISOString(),
   };
 }
@@ -1568,7 +1673,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 });
 
 app.post("/api/operations", async (req, res) => {
-  const { text, category, account } = req.body || {};
+  const { text, category, account, type, amount, label, incomeSource, date } = req.body || {};
   const owner = getOwnerFromRequest(req);
   if (owner?.error) {
     return res.status(401).json({ error: "Invalid Telegram data" });
@@ -1578,7 +1683,90 @@ app.post("/api/operations", async (req, res) => {
   }
   const categoriesList = await getCategoriesForOwner(owner.ownerId);
   const accountsList = await getAccountsForOwner(owner.ownerId);
-  const parsed = parseOperation(text, categoriesList, accountsList);
+  const incomeSourcesList = await getIncomeSourcesForOwner(owner.ownerId);
+
+  if (!text) {
+    const amountValue = Number(amount);
+    if (!Number.isFinite(amountValue)) {
+      return res.status(400).json({ error: "Amount is required" });
+    }
+    const typeValue = String(type || "expense");
+    const accountMatch = account
+      ? accountsList.find(
+          (a) => String(a.name).toLowerCase() === String(account).toLowerCase()
+        )
+      : null;
+    const defaultAccount = accountsList[0]?.name || "Наличные";
+    const accountName = accountMatch?.name || defaultAccount;
+    const pickIncomeSourceName = () => {
+      if (incomeSource) return incomeSource;
+      if (category) return category;
+      if (label) return label;
+      return "Прочее";
+    };
+    const incomeNames = incomeSourcesList.map((s) => s.name);
+    const incomeMatch = incomeNames.find(
+      (name) => String(name).toLowerCase() === String(pickIncomeSourceName()).toLowerCase()
+    );
+    const resolvedIncomeSource =
+      typeValue === "income"
+        ? incomeMatch ||
+          incomeNames.find((name) =>
+            String(name).toLowerCase().includes("проч")
+          ) ||
+          incomeNames[0] ||
+          "Прочее"
+        : null;
+    const resolvedCategory =
+      typeValue === "income"
+        ? resolvedIncomeSource || "Прочее"
+        : category ||
+          categoriesList.find((c) => c.name)?.name ||
+          "Другое";
+    const opLabel =
+      String(label || "").trim() ||
+      (typeValue === "income" ? resolvedIncomeSource : resolvedCategory) ||
+      "Операция";
+    const parseDateOnly = (value) => {
+      if (!value) return null;
+      const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        const year = Number(match[1]);
+        const month = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        return new Date(Date.UTC(year, month, day, 12, 0, 0));
+      }
+      const dateParsed = new Date(value);
+      if (Number.isNaN(dateParsed.getTime())) return null;
+      return dateParsed;
+    };
+    const createdAt = parseDateOnly(date) || new Date();
+    const op = {
+      id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      text: opLabel,
+      type: typeValue,
+      amount: amountValue,
+      amountCents: Math.round(amountValue * 100),
+      category: resolvedCategory,
+      account: accountName,
+      accountSpecified: Boolean(accountMatch),
+      incomeSource: resolvedIncomeSource,
+      createdAt: createdAt.toISOString(),
+      telegramUserId: owner.ownerId,
+    };
+    const settings = await getUserSettings(owner.ownerId);
+    const currencySymbol = getCurrencySymbol(settings.currencyCode);
+    Object.assign(op, buildDisplayFields(opLabel, op, currencySymbol));
+    try {
+      await saveOperation(op);
+      return res.json(op);
+    } catch (err) {
+      console.error("Save operation failed:", err?.message || err);
+      return res.status(500).json({ error: "Failed to save operation" });
+    }
+  }
+
+  const parsed = parseOperation(text, categoriesList, accountsList, incomeSourcesList);
   if (!parsed) {
     return res.status(400).json({ error: "Could not parse operation" });
   }
@@ -1657,13 +1845,17 @@ app.post("/telegram/webhook", (req, res) => {
             return;
           }
           if (field === "category") {
-            const categoriesList = await getCategoriesForOwner(ownerId);
+            const op = await getEditableOperation(opId, ownerId);
+            const categoriesList =
+              op?.type === "income"
+                ? await getIncomeSourcesForOwner(ownerId)
+                : await getCategoriesForOwner(ownerId);
             await telegramApi("answerCallbackQuery", {
               callback_query_id: cq.id,
             });
             await telegramApi("sendMessage", {
               chat_id: chatId,
-              text: "Выбери категорию:",
+              text: op?.type === "income" ? "Выбери источник дохода:" : "Выбери категорию:",
               reply_markup: {
                 inline_keyboard: [
                   categoriesList.map((cat) => ({
@@ -1776,7 +1968,12 @@ app.post("/telegram/webhook", (req, res) => {
             return;
           }
           const settings = await getUserSettings(ownerId);
-          op.category = categoryName;
+          if (op.type === "income") {
+            op.incomeSource = categoryName;
+            op.category = categoryName;
+          } else {
+            op.category = categoryName;
+          }
           op.amountText = formatAmount(op.amount, getCurrencySymbol(settings.currencyCode));
           await sendEditPreview(chatId, ownerId, op);
           return;
@@ -2014,7 +2211,10 @@ app.post("/telegram/webhook", (req, res) => {
       const accountsList = effectiveOwnerId
         ? await getAccountsForOwner(effectiveOwnerId)
         : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
-      const parsed = parseOperation(text, categoriesList, accountsList);
+      const incomeSourcesList = effectiveOwnerId
+        ? await getIncomeSourcesForOwner(effectiveOwnerId)
+        : defaultIncomeSources;
+      const parsed = parseOperation(text, categoriesList, accountsList, incomeSourcesList);
       if (!parsed) {
         await telegramApi("sendMessage", {
           chat_id: chatId,
@@ -2118,6 +2318,10 @@ app.get("/api/operations", async (req, res) => {
     const limitRaw = Number(req.query?.limit || 200);
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200;
     const account = req.query?.account ? String(req.query.account) : null;
+    const type = req.query?.type ? String(req.query.type) : null;
+    const incomeSource = req.query?.incomeSource
+      ? String(req.query.incomeSource)
+      : null;
     const parseDateParam = (value) => {
       if (!value) return null;
       const date = new Date(value);
@@ -2131,6 +2335,8 @@ app.get("/api/operations", async (req, res) => {
       limit,
       telegramUserId: owner.ownerId,
       account,
+      type,
+      incomeSource,
       before,
       from,
       to,
@@ -2159,9 +2365,10 @@ app.put("/api/operations/:id", async (req, res) => {
     const labelInput = String(req.body?.label || "").trim();
     const category = String(req.body?.category || "").trim();
     const account = String(req.body?.account || "").trim();
+    const incomeSourceInput = String(req.body?.incomeSource || "").trim();
     const amountValue = Number(req.body?.amount);
     const dateInput = String(req.body?.date || "").trim();
-    if (!id || !category || !account || !Number.isFinite(amountValue)) {
+    if (!id || !account || !Number.isFinite(amountValue)) {
       return res.status(400).json({ error: "Invalid input" });
     }
     const existing = await getOperationById(id, owner.ownerId);
@@ -2170,7 +2377,21 @@ app.put("/api/operations/:id", async (req, res) => {
     }
     const settings = await getUserSettings(owner.ownerId);
     const currencySymbol = getCurrencySymbol(settings.currencyCode);
-    const label = labelInput || existing.label || existing.text || "Операция";
+    if (existing.type !== "income" && !category) {
+      return res.status(400).json({ error: "Category is required" });
+    }
+    const resolvedIncomeSource =
+      existing.type === "income"
+        ? incomeSourceInput || existing.incomeSource || category || "Прочее"
+        : null;
+    const resolvedCategory =
+      existing.type === "income" ? resolvedIncomeSource || category : category;
+    const label =
+      labelInput ||
+      (existing.type === "income" ? resolvedIncomeSource : null) ||
+      existing.label ||
+      existing.text ||
+      "Операция";
     const labelEmoji = pickLabelEmoji(label);
     const amountCents = Math.round(amountValue * 100);
     const flowLine =
@@ -2200,18 +2421,19 @@ app.put("/api/operations/:id", async (req, res) => {
           String(op.telegramUserId || "") === String(owner.ownerId || "")
       );
       if (idx === -1) return res.status(404).json({ error: "Operation not found" });
-      const updated = {
+    const updated = {
         ...memoryOperations[idx],
         text: label,
         amount: amountValue,
         amountCents,
-        category,
+        category: resolvedCategory,
         account,
         accountSpecified: true,
         label,
         labelEmoji,
         amountText,
         flowLine,
+        incomeSource: resolvedIncomeSource,
         createdAt: createdAt || memoryOperations[idx].createdAt,
       };
       memoryOperations[idx] = updated;
@@ -2230,19 +2452,21 @@ app.put("/api/operations/:id", async (req, res) => {
       "label_emoji=$9",
       "amount_text=$10",
       "flow_line=$11",
+      "income_source=$12",
     ];
     const values = [
       label,
       existing.type,
       amountValue,
       amountCents,
-      category,
+      resolvedCategory,
       account,
       true,
       label,
       labelEmoji,
       amountText,
       flowLine,
+      resolvedIncomeSource,
     ];
     if (createdAt) {
       values.push(createdAt);
@@ -2258,7 +2482,7 @@ app.put("/api/operations/:id", async (req, res) => {
       WHERE id = $${idPos} AND telegram_user_id = $${ownerPos}
       RETURNING id, text, type, amount, amount_cents, category, account, account_specified,
                 telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
-                source_message_id
+                source_message_id, income_source
     `,
       values
     );
@@ -2288,6 +2512,7 @@ app.put("/api/operations/:id", async (req, res) => {
       amountText: row.amount_text,
       flowLine: row.flow_line,
       sourceMessageId: row.source_message_id,
+      incomeSource: row.income_source || null,
     });
   } catch (err) {
     console.error("Update operation failed:", err?.message || err);
@@ -2398,6 +2623,144 @@ app.delete("/api/categories/:id", async (req, res) => {
   } catch (err) {
     console.error("Delete category failed:", err?.message || err);
     res.status(500).json({ error: "Failed to delete category" });
+  }
+});
+
+app.get("/api/income-sources", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const list = await getIncomeSourcesForOwner(owner.ownerId);
+    res.json(list.map((s) => ({ id: s.id, name: s.name })));
+  } catch (err) {
+    console.error("Load income sources failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load income sources" });
+  }
+});
+
+app.post("/api/income-sources", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const name = String(req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const id = `inc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    await dbPool.query(
+      "INSERT INTO income_sources (id, owner_id, name) VALUES ($1, $2, $3)",
+      [id, owner.ownerId, name]
+    );
+    res.json({ id, name });
+  } catch (err) {
+    console.error("Create income source failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create income source" });
+  }
+});
+
+app.put("/api/income-sources/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const name = String(req.body?.name || "").trim();
+    if (!id || !name) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const current = await dbPool.query(
+      "SELECT name FROM income_sources WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!current.rows.length) {
+      return res.status(404).json({ error: "Income source not found" });
+    }
+    const oldName = current.rows[0].name;
+    await dbPool.query(
+      "UPDATE income_sources SET name = $1 WHERE id = $2 AND owner_id = $3",
+      [name, id, owner.ownerId]
+    );
+    await dbPool.query(
+      `UPDATE operations
+       SET income_source = $1, category = CASE WHEN type = 'income' THEN $1 ELSE category END
+       WHERE telegram_user_id = $2
+         AND (income_source = $3 OR (income_source IS NULL AND category = $3))`,
+      [name, owner.ownerId, oldName]
+    );
+    res.json({ id, name });
+  } catch (err) {
+    console.error("Update income source failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update income source" });
+  }
+});
+
+app.delete("/api/income-sources/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const sourceRow = await dbPool.query(
+      "SELECT name FROM income_sources WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!sourceRow.rows.length) {
+      return res.status(404).json({ error: "Income source not found" });
+    }
+    const fallback = await dbPool.query(
+      "SELECT name FROM income_sources WHERE owner_id = $1 AND id <> $2 ORDER BY created_at ASC LIMIT 1",
+      [owner.ownerId, id]
+    );
+    if (!fallback.rows.length) {
+      return res.status(400).json({ error: "Нужен хотя бы один источник дохода" });
+    }
+    const oldName = sourceRow.rows[0].name;
+    const nextName = fallback.rows[0].name;
+    await dbPool.query(
+      `UPDATE operations
+       SET income_source = $1, category = CASE WHEN type = 'income' THEN $1 ELSE category END
+       WHERE telegram_user_id = $2
+         AND (income_source = $3 OR (income_source IS NULL AND category = $3))`,
+      [nextName, owner.ownerId, oldName]
+    );
+    await dbPool.query("DELETE FROM income_sources WHERE id = $1 AND owner_id = $2", [
+      id,
+      owner.ownerId,
+    ]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete income source failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete income source" });
   }
 });
 

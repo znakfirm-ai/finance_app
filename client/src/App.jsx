@@ -86,6 +86,7 @@ function App() {
   const [operations, setOperations] = useState([]);
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [incomeSources, setIncomeSources] = useState([]);
   const [currencyOptions, setCurrencyOptions] = useState([]);
   const [settings, setSettings] = useState({ currencyCode: "RUB", currencySymbol: "₽" });
   const [historyFilter, setHistoryFilter] = useState({
@@ -104,6 +105,7 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [newAccountName, setNewAccountName] = useState("");
+  const [newIncomeSourceName, setNewIncomeSourceName] = useState("");
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [editingAccountName, setEditingAccountName] = useState("");
   const [editingAccountBalance, setEditingAccountBalance] = useState("");
@@ -112,6 +114,10 @@ function App() {
   const [accountSaveMessage, setAccountSaveMessage] = useState("");
   const [accountEditor, setAccountEditor] = useState(null);
   const [accountDetail, setAccountDetail] = useState(null);
+  const [incomeSourceEditor, setIncomeSourceEditor] = useState(null);
+  const [incomeSourceDetail, setIncomeSourceDetail] = useState(null);
+  const [editingIncomeSourceName, setEditingIncomeSourceName] = useState("");
+  const [incomeSourceSaveMessage, setIncomeSourceSaveMessage] = useState("");
   const [operationEditor, setOperationEditor] = useState(null);
   const [hideBottomNav, setHideBottomNav] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -179,6 +185,16 @@ function App() {
     } catch (_) {}
   }
 
+  async function loadIncomeSources() {
+    try {
+      const res = await fetch(apiUrl(withWebQuery("/api/income-sources")), {
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      setIncomeSources(Array.isArray(data) ? data : []);
+    } catch (_) {}
+  }
+
   async function loadCategories() {
     try {
       const res = await fetch(apiUrl(withWebQuery("/api/categories")), {
@@ -199,14 +215,20 @@ function App() {
     } catch (_) {}
   }
 
-  async function loadAccountHistory(reset = true) {
-    if (!accountDetail) return;
+  async function loadHistory(reset = true) {
+    const target = accountDetail || incomeSourceDetail;
+    if (!target) return;
     if (historyLoading) return;
     setHistoryLoading(true);
     try {
       const params = new URLSearchParams();
       params.set("limit", "50");
-      params.set("account", accountDetail.name);
+      if (accountDetail) {
+        params.set("account", accountDetail.name);
+      } else if (incomeSourceDetail) {
+        params.set("type", "income");
+        params.set("incomeSource", incomeSourceDetail.name);
+      }
       if (!reset && historyBefore) {
         params.set("before", historyBefore);
       }
@@ -257,6 +279,7 @@ function App() {
     loadSettings();
     loadCategories();
     loadAccounts();
+    loadIncomeSources();
     loadOperations();
   }, [telegramReady, initData, webUserId]);
 
@@ -306,12 +329,17 @@ function App() {
       setNewAccountBalance("");
       setShowAccountEditPanel(false);
       setAccountDetail(null);
+      setIncomeSourceEditor(null);
+      setIncomeSourceDetail(null);
+      setEditingIncomeSourceName("");
+      setNewIncomeSourceName("");
       setOperationEditor(null);
     }
   }, [view]);
 
   useEffect(() => {
-    if (!accountDetail) return;
+    const target = accountDetail || incomeSourceDetail;
+    if (!target) return;
     setHistoryBefore(null);
     setHistoryHasMore(true);
     setHistoryQuery("");
@@ -319,14 +347,23 @@ function App() {
     setCustomRange({ from: "", to: "" });
     setCustomRangeDraft({ from: "", to: "" });
     setShowCustomRange(false);
-  }, [accountDetail?.id, initData, webUserId]);
+  }, [accountDetail?.id, incomeSourceDetail?.id, initData, webUserId]);
 
   useEffect(() => {
-    if (!accountDetail) return;
+    const target = accountDetail || incomeSourceDetail;
+    if (!target) return;
     setHistoryBefore(null);
     setHistoryHasMore(true);
-    loadAccountHistory(true);
-  }, [historyPeriod, customRange.from, customRange.to, accountDetail?.id, initData, webUserId]);
+    loadHistory(true);
+  }, [
+    historyPeriod,
+    customRange.from,
+    customRange.to,
+    accountDetail?.id,
+    incomeSourceDetail?.id,
+    initData,
+    webUserId,
+  ]);
 
   useEffect(() => {
     if (!accountEditor) return;
@@ -347,6 +384,16 @@ function App() {
     );
     setShowAccountEditPanel(false);
   }, [accountEditor?.id, accountEditor?.mode, accountEditor?.openingBalance, operations]);
+
+  useEffect(() => {
+    if (!incomeSourceEditor) return;
+    if (incomeSourceEditor.mode === "create") {
+      setNewIncomeSourceName("");
+      setEditingIncomeSourceName("");
+      return;
+    }
+    setEditingIncomeSourceName(incomeSourceEditor.name || "");
+  }, [incomeSourceEditor?.id, incomeSourceEditor?.mode, incomeSourceEditor?.name]);
 
   const currencySymbolByCode = (code) => {
     const entry = currencyOptions.find((c) => c.code === code);
@@ -688,6 +735,84 @@ function App() {
     }
   }
 
+  async function createIncomeSource() {
+    const name = newIncomeSourceName.trim();
+    if (!name) return;
+    try {
+      const payload = { name };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl("/api/income-sources"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setIncomeSources((prev) => [...prev, data]);
+      setNewIncomeSourceName("");
+      setIncomeSourceEditor({ ...data, mode: "edit", originalName: data.name });
+      setEditingIncomeSourceName(data.name);
+      setIncomeSourceSaveMessage("Источник создан");
+      setTimeout(() => setIncomeSourceSaveMessage(""), 2000);
+    } catch (e) {
+      setError(e.message || "Ошибка создания источника");
+    }
+  }
+
+  async function updateIncomeSource(id) {
+    const name = editingIncomeSourceName.trim();
+    if (!name) return;
+    try {
+      const payload = { name };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(`/api/income-sources/${id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setIncomeSources((prev) => prev.map((src) => (src.id === id ? data : src)));
+      if (incomeSourceDetail && incomeSourceDetail.id === id) {
+        setIncomeSourceDetail({ ...incomeSourceDetail, name: data.name });
+      }
+      setIncomeSourceEditor({ ...data, mode: "edit", originalName: data.name });
+      await loadOperations();
+      setIncomeSourceSaveMessage("Сохранено");
+      setTimeout(() => setIncomeSourceSaveMessage(""), 2000);
+    } catch (e) {
+      setError(e.message || "Ошибка обновления источника");
+    }
+  }
+
+  async function deleteIncomeSource(id) {
+    if (!confirm("Удалить источник дохода?")) return;
+    try {
+      const payload = {};
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(withWebQuery(`/api/income-sources/${id}`)), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setIncomeSources((prev) => prev.filter((src) => src.id !== id));
+      if (incomeSourceDetail?.id === id) {
+        setIncomeSourceDetail(null);
+      }
+      if (incomeSourceEditor?.id === id) {
+        setIncomeSourceEditor(null);
+      }
+      await loadOperations();
+    } catch (e) {
+      setError(e.message || "Ошибка удаления источника");
+    }
+  }
+
   async function updateAccount(id) {
     const name = editingAccountName.trim();
     if (!name) return;
@@ -764,6 +889,7 @@ function App() {
         amount: entry.amount,
         account: entry.account,
         category: entry.category,
+        incomeSource: entry.incomeSource,
       };
       if (entry.date) payload.date = entry.date;
       if (webUserId) payload.webUserId = webUserId;
@@ -780,11 +906,42 @@ function App() {
       );
       setOperationEditor(null);
       await loadOperations();
-      if (accountDetail) {
-        await loadAccountHistory(true);
+      if (accountDetail || incomeSourceDetail) {
+        await loadHistory(true);
       }
     } catch (e) {
       setError(e.message || "Ошибка обновления операции");
+    }
+  }
+
+  async function createOperationEntry(entry) {
+    try {
+      const payload = {
+        type: entry.type,
+        amount: entry.amount,
+        account: entry.account,
+        category: entry.category,
+        incomeSource: entry.incomeSource,
+        label: entry.label,
+        date: entry.date,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(withWebQuery(`/api/operations`)), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setOperations((prev) => [data, ...prev]);
+      setOperationEditor(null);
+      await loadOperations();
+      if (accountDetail || incomeSourceDetail) {
+        await loadHistory(true);
+      }
+    } catch (e) {
+      setError(e.message || "Ошибка создания операции");
     }
   }
 
@@ -802,11 +959,26 @@ function App() {
     const totals = {};
     operations.forEach((op) => {
       if (op.type !== "income") return;
-      const key = op.category || "Другое";
+      const key = op.incomeSource || op.category || "Прочее";
       totals[key] = (totals[key] || 0) + Number(op.amount || 0);
     });
     return Object.entries(totals).sort((a, b) => b[1] - a[1]);
   }, [operations]);
+
+  const incomeSourceTotals = useMemo(() => {
+    const totals = new Map();
+    incomeSources.forEach((src) => totals.set(src.name, 0));
+    operations.forEach((op) => {
+      if (op.type !== "income") return;
+      const key = op.incomeSource || op.category || "Прочее";
+      totals.set(key, (totals.get(key) || 0) + Number(op.amount || 0));
+    });
+    return incomeSources.map((src) => ({
+      id: src.id,
+      name: src.name,
+      total: totals.get(src.name) || 0,
+    }));
+  }, [incomeSources, operations]);
 
   const summary = useMemo(() => {
     const includeMap = new Map();
@@ -978,7 +1150,7 @@ function App() {
   }, [filteredHistory]);
 
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
-  const incomePages = Math.max(1, Math.ceil(incomeByCategory.length / 4));
+  const incomePages = Math.max(1, Math.ceil(incomeSourceTotals.length / 4));
 
   const updateBalanceArrows = () => {
     const el = balanceScrollRef.current;
@@ -998,7 +1170,7 @@ function App() {
       !historyLoading &&
       !historyQuery
     ) {
-      loadAccountHistory(false);
+      loadHistory(false);
     }
   };
 
@@ -1082,9 +1254,21 @@ function App() {
   const content = (() => {
     if (operationEditor) {
       const isIncome = operationEditor.type === "income";
-      const labelTitle = isIncome ? "Источник дохода" : "Наименование";
+      const isCreate = operationEditor.mode === "create";
+      const labelTitle = "Наименование";
+      const incomeSourceValue =
+        operationEditor.incomeSource ||
+        (isIncome ? operationEditor.category : null) ||
+        "";
+      const incomeSourceOptions = (() => {
+        const names = incomeSources.map((src) => src.name);
+        if (incomeSourceValue && !names.includes(incomeSourceValue)) {
+          return [incomeSourceValue, ...names];
+        }
+        return names;
+      })();
       const operationPath = isIncome
-        ? `${operationEditor.label || "Источник"} → ${operationEditor.account || ""}`
+        ? `${incomeSourceValue || operationEditor.label || "Источник"} → ${operationEditor.account || ""}`
         : `${operationEditor.account || ""} → ${operationEditor.category || ""}`;
       return (
         <section className="card">
@@ -1108,6 +1292,28 @@ function App() {
             }
             placeholder="Например: кофе"
           />
+          {isIncome && (
+            <>
+              <label className="label">Источник дохода</label>
+              <select
+                className="select"
+                value={incomeSourceValue}
+                onChange={(e) =>
+                  setOperationEditor((prev) => ({
+                    ...prev,
+                    incomeSource: e.target.value,
+                    category: e.target.value,
+                  }))
+                }
+              >
+                {incomeSourceOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           <label className="label">Дата операции</label>
           <input
             className="input"
@@ -1144,35 +1350,46 @@ function App() {
               </option>
             ))}
           </select>
-          <label className="label">Категория</label>
-          <select
-            className="select"
-            value={operationEditor.category}
-            onChange={(e) =>
-              setOperationEditor((prev) => ({ ...prev, category: e.target.value }))
-            }
-          >
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.name}>
-                {cat.name}
-              </option>
-            ))}
-          </select>
+          {!isIncome && (
+            <>
+              <label className="label">Категория</label>
+              <select
+                className="select"
+                value={operationEditor.category}
+                onChange={(e) =>
+                  setOperationEditor((prev) => ({ ...prev, category: e.target.value }))
+                }
+              >
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.name}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           <div className="row">
             <button
               className="btn"
-              onClick={() =>
-                updateOperationEntry({
+              onClick={() => {
+                const payload = {
                   id: operationEditor.id,
                   label: operationEditor.label,
                   amount: operationEditor.amount,
                   account: operationEditor.account,
                   category: operationEditor.category,
+                  incomeSource: operationEditor.incomeSource,
                   date: operationEditor.date,
-                })
-              }
+                  type: operationEditor.type,
+                };
+                if (isCreate) {
+                  createOperationEntry(payload);
+                } else {
+                  updateOperationEntry(payload);
+                }
+              }}
             >
-              Сохранить
+              {isCreate ? "Добавить" : "Сохранить"}
             </button>
             <button className="btn ghost" onClick={() => setOperationEditor(null)}>
               Отмена
@@ -1432,6 +1649,187 @@ function App() {
         return <section className="overview-shell">{accountEditorView}</section>;
       }
 
+      const incomeSourceEditorView = incomeSourceEditor ? (
+        <div className="overview-manage">
+          <div className="overview-manage-header">
+            <div className="overview-manage-title">
+              {incomeSourceEditor.mode === "create"
+                ? "Новый источник дохода"
+                : "Источник дохода"}
+            </div>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setIncomeSourceEditor(null);
+                setEditingIncomeSourceName("");
+                setNewIncomeSourceName("");
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+          {incomeSourceEditor.mode === "create" ? (
+            <div className="account-edit-panel">
+              <label className="label">Название источника</label>
+              <input
+                className="input"
+                value={newIncomeSourceName}
+                onChange={(e) => setNewIncomeSourceName(e.target.value)}
+                placeholder="Например: Зарплата"
+              />
+              <button className="btn" onClick={createIncomeSource}>
+                Добавить
+              </button>
+            </div>
+          ) : (
+            <div className="account-edit-panel">
+              <label className="label">Название источника</label>
+              <input
+                className="input"
+                value={editingIncomeSourceName}
+                onChange={(e) => setEditingIncomeSourceName(e.target.value)}
+              />
+              <div className="row">
+                <button
+                  className="btn"
+                  onClick={() => updateIncomeSource(incomeSourceEditor.id)}
+                >
+                  Сохранить
+                </button>
+              </div>
+            </div>
+          )}
+          {incomeSourceSaveMessage && (
+            <div className="status success">{incomeSourceSaveMessage}</div>
+          )}
+          {incomeSourceEditor.mode === "edit" && (
+            <button
+              className="btn danger"
+              onClick={() => deleteIncomeSource(incomeSourceEditor.id)}
+            >
+              Удалить источник
+            </button>
+          )}
+        </div>
+      ) : null;
+
+      if (incomeSourceEditorView) {
+        return <section className="overview-shell">{incomeSourceEditorView}</section>;
+      }
+
+      if (incomeSourceDetail) {
+        return (
+          <section className="overview-shell">
+            <div className="overview-manage-header">
+              <div className="overview-manage-title">{incomeSourceDetail.name}</div>
+              <button className="btn ghost" onClick={() => setIncomeSourceDetail(null)}>
+                Закрыть
+              </button>
+            </div>
+            <div className="row">
+              <input
+                className="input"
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Поиск по названию или сумме"
+              />
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setCustomRangeDraft(customRange);
+                  setShowCustomRange(historyPeriod === "custom");
+                  setShowPeriodSheet(true);
+                }}
+              >
+                Период
+              </button>
+            </div>
+            {periodRangeText && (
+              <div className="history-range">{periodRangeText}</div>
+            )}
+            <button
+              className="btn"
+              onClick={() =>
+                setOperationEditor({
+                  mode: "create",
+                  type: "income",
+                  label: "",
+                  amount: "",
+                  account: accounts[0]?.name || "",
+                  category: incomeSourceDetail.name,
+                  incomeSource: incomeSourceDetail.name,
+                  date: formatDateInput(new Date()),
+                })
+              }
+            >
+              Добавить доход
+            </button>
+            <div className="history-list" ref={historyListRef} onScroll={handleHistoryScroll}>
+              {groupedHistory.length === 0 ? (
+                <div className="muted">Пока нет операций</div>
+              ) : (
+                groupedHistory.map((group) => (
+                  <div key={group.key} className="history-group">
+                    <div className="history-date-row">
+                      <div className="history-date">{group.key}</div>
+                      <div className="history-date-total">
+                        {formatMoney(Math.abs(group.total), settings.currencySymbol)}
+                      </div>
+                    </div>
+                    <div className="history-rows">
+                      {group.items.map((op) => (
+                        <button
+                          key={op.id}
+                          className="history-row"
+                          onClick={() =>
+                            setOperationEditor({
+                              mode: "edit",
+                              id: op.id,
+                              label: op.label || op.text || "",
+                              amount: op.amount,
+                              account: op.account,
+                              category: op.category || "Прочее",
+                              incomeSource: op.incomeSource || op.category || "",
+                              type: op.type,
+                              date: formatDateInput(
+                                op.createdAt || op.date || op.created_at || ""
+                              ),
+                            })
+                          }
+                        >
+                          <div className="history-row-main">
+                            <span className="history-emoji">
+                              {op.labelEmoji || "🧾"}
+                            </span>
+                            <span className="history-label">{op.label || op.text}</span>
+                          </div>
+                          <span className="history-amount">
+                            {formatMoney(op.amount, settings.currencySymbol)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <button
+              className="btn ghost"
+              onClick={() =>
+                setIncomeSourceEditor({
+                  id: incomeSourceDetail.id,
+                  name: incomeSourceDetail.name,
+                  originalName: incomeSourceDetail.name,
+                  mode: "edit",
+                })
+              }
+            >
+              Редактировать источник
+            </button>
+          </section>
+        );
+      }
+
       if (accountDetail) {
         return (
           <section className="overview-shell">
@@ -1486,11 +1884,13 @@ function App() {
                           className="history-row"
                           onClick={() =>
                             setOperationEditor({
+                              mode: "edit",
                               id: op.id,
                               label: op.label || op.text || "",
                               amount: op.amount,
                               account: op.account,
                               category: op.category || "Другое",
+                              incomeSource: op.incomeSource || op.category || "",
                               type: op.type,
                               date: formatDateInput(
                                 op.createdAt || op.date || op.created_at || ""
@@ -1577,6 +1977,7 @@ function App() {
                       setAccountDetail(null);
                       return;
                     }
+                    setIncomeSourceDetail(null);
                     setAccountDetail({
                       id: acc.key,
                       name: acc.label,
@@ -1608,6 +2009,8 @@ function App() {
                     setNewAccountName("");
                     return;
                   }
+                  setIncomeSourceEditor(null);
+                  setIncomeSourceDetail(null);
                   setAccountEditor({
                     mode: "create",
                     name: "",
@@ -1635,16 +2038,49 @@ function App() {
 
           {accountEditorView}
 
-          {!accountEditor && incomeByCategory.length > 0 && (
+          {!accountEditor && !incomeSourceEditor && (
             <div className="overview-section">
               <div className="overview-carousel">
-                {incomeByCategory.slice(0, 8).map(([name, value]) => (
-                  <div key={name} className="overview-tile income">
+                {incomeSourceTotals.map((src) => (
+                  <button
+                    key={src.id}
+                    className="overview-tile income"
+                    onClick={() => {
+                      if (incomeSourceDetail?.id === src.id) {
+                        setIncomeSourceDetail(null);
+                        return;
+                      }
+                      setAccountDetail(null);
+                      setIncomeSourceDetail({ id: src.id, name: src.name });
+                    }}
+                  >
                     <div className="overview-icon">💰</div>
-                    <div className="overview-name">{name}</div>
-                    <div className="overview-amount">{formatMoney(value)}</div>
-                  </div>
+                    <div className="overview-name">{src.name}</div>
+                    <div className="overview-amount">{formatMoney(src.total)}</div>
+                  </button>
                 ))}
+                <button
+                  className="overview-tile add"
+                  onClick={() => {
+                    if (incomeSourceEditor?.mode === "create") {
+                      setIncomeSourceEditor(null);
+                      setEditingIncomeSourceName("");
+                      setNewIncomeSourceName("");
+                      return;
+                    }
+                    setIncomeSourceEditor({
+                      mode: "create",
+                      name: "",
+                      originalName: "",
+                    });
+                    setIncomeSourceDetail(null);
+                    setEditingIncomeSourceName("");
+                    setNewIncomeSourceName("");
+                  }}
+                >
+                  <div className="overview-icon">＋</div>
+                  <div className="overview-name">Добавить</div>
+                </button>
               </div>
               <div className="overview-dots">
                 {Array.from({ length: incomePages }).map((_, idx) => (
