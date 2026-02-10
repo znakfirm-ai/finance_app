@@ -1315,12 +1315,11 @@ function App() {
             </>
           )}
           <label className="label">Дата операции</label>
-          <input
-            className="input"
-            type="date"
-            value={operationEditor.date || ""}
-            onChange={(e) =>
-              setOperationEditor((prev) => ({ ...prev, date: e.target.value }))
+          <DateSlotPicker
+            value={operationEditor.date || formatDateInput(new Date())}
+            ariaLabel="Дата операции"
+            onChange={(value) =>
+              setOperationEditor((prev) => ({ ...prev, date: value }))
             }
           />
           <label className="label">Сумма</label>
