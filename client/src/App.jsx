@@ -123,6 +123,40 @@ const IconTag = () => (
 
 const CategoryIcon = () => <IconTag />;
 
+const IconTarget = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    <path
+      d="M12 5V2m7 10h3M12 22v-3M2 12h3"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const IconDebt = () => (
+  <svg viewBox="0 0 24 24" className="tile-icon" aria-hidden="true">
+    <path
+      d="M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M4 8l3-4h10l3 4M7.5 14h9"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 function App() {
   const [view, setView] = useState("home");
   const [operations, setOperations] = useState([]);
@@ -1305,6 +1339,16 @@ function App() {
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
   const incomePages = Math.max(1, Math.ceil(incomeSourceTotals.length / 4));
   const categoryPages = Math.max(1, Math.ceil(categoryTotals.length / 4));
+  const goalPlaceholders = [
+    { id: "goal-1", name: "Подушка", amount: 0 },
+    { id: "goal-2", name: "Отпуск", amount: 0 },
+  ];
+  const debtPlaceholders = [
+    { id: "debt-1", name: "Кредит", amount: 0 },
+    { id: "debt-2", name: "Долг", amount: 0 },
+  ];
+  const goalPages = Math.max(1, Math.ceil((goalPlaceholders.length + 1) / 4));
+  const debtPages = Math.max(1, Math.ceil((debtPlaceholders.length + 1) / 4));
 
   const updateBalanceArrows = () => {
     const el = balanceScrollRef.current;
@@ -2536,6 +2580,62 @@ function App() {
               </div>
               <div className="overview-dots">
                 {Array.from({ length: categoryPages }).map((_, idx) => (
+                  <span key={idx} className="dot" />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!accountEditor && !incomeSourceEditor && (
+            <div className="overview-section">
+              <div className="overview-section-header">
+                <div className="overview-subtitle">Цели</div>
+              </div>
+              <div className="overview-carousel">
+                {goalPlaceholders.map((goal) => (
+                  <div key={goal.id} className="overview-tile placeholder goal">
+                    <div className="overview-icon">
+                      <IconTarget />
+                    </div>
+                    <div className="overview-name">{goal.name}</div>
+                    <div className="overview-amount">{formatMoney(goal.amount)}</div>
+                  </div>
+                ))}
+                <div className="overview-tile add placeholder">
+                  <div className="overview-icon">＋</div>
+                  <div className="overview-name">Добавить</div>
+                </div>
+              </div>
+              <div className="overview-dots">
+                {Array.from({ length: goalPages }).map((_, idx) => (
+                  <span key={idx} className="dot" />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!accountEditor && !incomeSourceEditor && (
+            <div className="overview-section">
+              <div className="overview-section-header">
+                <div className="overview-subtitle">Долги / Кредиты</div>
+              </div>
+              <div className="overview-carousel">
+                {debtPlaceholders.map((item) => (
+                  <div key={item.id} className="overview-tile placeholder debt">
+                    <div className="overview-icon">
+                      <IconDebt />
+                    </div>
+                    <div className="overview-name">{item.name}</div>
+                    <div className="overview-amount">{formatMoney(item.amount)}</div>
+                  </div>
+                ))}
+                <div className="overview-tile add placeholder">
+                  <div className="overview-icon">＋</div>
+                  <div className="overview-name">Добавить</div>
+                </div>
+              </div>
+              <div className="overview-dots">
+                {Array.from({ length: debtPages }).map((_, idx) => (
                   <span key={idx} className="dot" />
                 ))}
               </div>
