@@ -38,6 +38,7 @@
   gap: 12px;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
   max-width: 100%;
+  overflow-x: hidden;
 }
 
 .card.subtle {
@@ -109,6 +110,11 @@
 .status {
   font-size: 14px;
   color: #6b7280;
+}
+
+.status.success {
+  color: #16a34a;
+  font-weight: 600;
 }
 
 .error {
@@ -1009,6 +1015,7 @@
   gap: 10px;
   max-height: 80vh;
   overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .sheet-title {
@@ -1030,6 +1037,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+}
+
+.sheet-range .input {
+  max-width: 100%;
+  min-width: 0;
 }
 
 @media (max-width: 640px) {

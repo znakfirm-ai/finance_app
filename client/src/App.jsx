@@ -109,6 +109,7 @@ function App() {
   const [editingAccountBalance, setEditingAccountBalance] = useState("");
   const [newAccountBalance, setNewAccountBalance] = useState("");
   const [showAccountEditPanel, setShowAccountEditPanel] = useState(false);
+  const [accountSaveMessage, setAccountSaveMessage] = useState("");
   const [accountEditor, setAccountEditor] = useState(null);
   const [accountDetail, setAccountDetail] = useState(null);
   const [operationEditor, setOperationEditor] = useState(null);
@@ -425,6 +426,14 @@ function App() {
     }, 0);
   };
 
+  const parseNumberInput = (value) => {
+    if (value === null || value === undefined) return null;
+    const cleaned = String(value).replace(/\s/g, "").replace(/,/g, ".");
+    if (!cleaned) return null;
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : null;
+  };
+
   async function saveOperation() {
     const trimmed = entryText.trim();
     if (!trimmed) {
@@ -555,12 +564,13 @@ function App() {
     const name = newAccountName.trim();
     if (!name) return;
     try {
+      const parsedBalance = parseNumberInput(newAccountBalance);
       const payload = {
         name,
         currencyCode: accountEditor?.currencyCode || settings.currencyCode,
         color: accountEditor?.color || "#0f172a",
         includeInBalance: accountEditor?.includeInBalance !== false,
-        openingBalance: Number(newAccountBalance || 0),
+        openingBalance: parsedBalance ?? 0,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -574,8 +584,10 @@ function App() {
       setAccounts((prev) => [...prev, data]);
       setNewAccountName("");
       setNewAccountBalance("");
+      setAccountSaveMessage("Счет создан");
       setAccountEditor({ ...data, mode: "edit", originalName: data.name });
       await loadOperations();
+      setTimeout(() => setAccountSaveMessage(""), 2000);
     } catch (e) {
       setError(e.message || "Ошибка создания счета");
     }
@@ -586,7 +598,7 @@ function App() {
     if (!name) return;
     try {
       const net = getAccountNet(accountEditor?.originalName || name);
-      const desiredBalance = Number(editingAccountBalance);
+      const desiredBalance = parseNumberInput(editingAccountBalance);
       const openingBalance = Number.isFinite(desiredBalance)
         ? desiredBalance - net
         : accountEditor?.openingBalance || 0;
@@ -617,6 +629,8 @@ function App() {
       setEditingAccountName("");
       setEditingAccountBalance("");
       setShowAccountEditPanel(false);
+      setAccountSaveMessage("Сохранено");
+      setTimeout(() => setAccountSaveMessage(""), 2000);
     } catch (e) {
       setError(e.message || "Ошибка обновления счета");
     }
@@ -1216,6 +1230,9 @@ function App() {
                   </div>
                 </div>
               </div>
+              {accountSaveMessage && (
+                <div className="status success">{accountSaveMessage}</div>
+              )}
               {showAccountEditPanel && (
                 <div className="account-edit-panel">
                   <label className="label">Название счета</label>
@@ -1304,6 +1321,9 @@ function App() {
               Сохранить изменения
             </button>
           )}
+          {accountEditor.mode === "create" && accountSaveMessage && (
+            <div className="status success">{accountSaveMessage}</div>
+          )}
           {accountEditor.mode === "edit" && (
             <button className="btn danger" onClick={() => deleteAccount(accountEditor.id)}>
               Удалить счет
@@ -1356,7 +1376,7 @@ function App() {
                       <div className="history-date">{group.key}</div>
                       <div className="history-date-total">
                         {formatMoney(
-                          group.total,
+                          Math.abs(group.total),
                           currencySymbolByCode(
                             accountDetail.currencyCode || settings.currencyCode
                           )
