@@ -1413,6 +1413,13 @@ app.post("/telegram/webhook", (req, res) => {
             text: "Не понял сумму. Напиши проще, например: \"потратил 350 на кофе\".",
           });
         }
+        await telegramApi("sendMessage", {
+          chat_id: chatId,
+          text: "👋 Привет! Давай устроим твоим финансам порядок?",
+          reply_markup: {
+            inline_keyboard: [[{ text: "Давай", callback_data: "onboard:yes" }]],
+          },
+        });
         return;
       }
       if (telegramUserId) {
