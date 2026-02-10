@@ -96,6 +96,7 @@ const pendingOperations = new Map();
 const pendingEdits = new Map();
 const pendingEditConfirm = new Map();
 const pendingOnboarding = new Map();
+const operationSourceMessages = new Map();
 const processedUpdates = new Map();
 const UPDATE_TTL_MS = 5 * 60 * 1000;
 let dbPool = null;
@@ -434,6 +435,7 @@ async function sendEditPreview(chatId, ownerId, op, context = {}) {
   if (existing?.previewMessageId) {
     await safeDeleteMessage(chatId, existing.previewMessageId);
   }
+  const source = operationSourceMessages.get(op.id);
   const messageText =
     `${op.labelEmoji} ${op.label}\n` +
     `💸 ${op.amountText}\n` +
@@ -457,7 +459,11 @@ async function sendEditPreview(chatId, ownerId, op, context = {}) {
     ownerId,
     chatId,
     previewMessageId: previewMessage?.message_id,
-    sourceUserMessageId: context.sourceUserMessageId || existing?.sourceUserMessageId,
+    sourceUserMessageId:
+      context.sourceUserMessageId ||
+      existing?.sourceUserMessageId ||
+      source?.messageId ||
+      null,
   });
 }
 
@@ -1576,6 +1582,7 @@ app.post("/telegram/webhook", (req, res) => {
           }
           await updateOperation(staged.op, ownerId);
           await safeDeleteMessage(chatId, staged.sourceUserMessageId);
+          operationSourceMessages.delete(opId);
           pendingEditConfirm.delete(opId);
           const messageText =
             `${staged.op.labelEmoji} ${staged.op.label}\n` +
@@ -1680,6 +1687,7 @@ app.post("/telegram/webhook", (req, res) => {
           });
           await safeDeleteMessage(chatId, cq.message?.message_id);
           pendingEditConfirm.delete(opId);
+          operationSourceMessages.delete(opId);
           await telegramApi("sendMessage", {
             chat_id: chatId,
             text: deleted ? "Удалил операцию." : "Не удалось найти операцию.",
@@ -1716,6 +1724,10 @@ app.post("/telegram/webhook", (req, res) => {
               await updateOperation(pending.parsed, pending.ownerId);
             } else {
               await saveOperation(pending.parsed);
+              operationSourceMessages.set(pending.parsed.id, {
+                chatId,
+                messageId: pending.sourceUserMessageId,
+              });
             }
           } catch (err) {
             console.error("Save operation failed:", err?.message || err);
@@ -1922,6 +1934,7 @@ app.post("/telegram/webhook", (req, res) => {
           currencySymbol,
           editId: editContext?.opId || null,
           ownerId: effectiveOwnerId,
+          sourceUserMessageId: message.message_id,
         });
         pendingEdits.delete(chatId);
         const prompt =
@@ -1950,6 +1963,10 @@ app.post("/telegram/webhook", (req, res) => {
           await updateOperation(parsed, effectiveOwnerId);
         } else {
           await saveOperation(parsed);
+          operationSourceMessages.set(parsed.id, {
+            chatId,
+            messageId: message.message_id,
+          });
         }
       } catch (err) {
         console.error("Save operation failed:", err?.message || err);
