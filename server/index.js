@@ -232,6 +232,9 @@ async function initDb() {
     `ALTER TABLE accounts ADD COLUMN IF NOT EXISTS color text NOT NULL DEFAULT '${DEFAULT_ACCOUNT_COLOR}';`
   );
   await dbPool.query(
+    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS opening_balance numeric(12,2) NOT NULL DEFAULT 0;"
+  );
+  await dbPool.query(
     "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS include_in_balance boolean NOT NULL DEFAULT true;"
   );
   await dbPool.query(
@@ -819,11 +822,12 @@ async function getAccountsForOwner(ownerId) {
       name,
       currencyCode: "RUB",
       color: DEFAULT_ACCOUNT_COLOR,
+      openingBalance: 0,
       includeInBalance: true,
     }));
   }
   const { rows } = await dbPool.query(
-    `SELECT id, name, currency_code, color, include_in_balance
+    `SELECT id, name, currency_code, color, include_in_balance, opening_balance
      FROM accounts WHERE owner_id = $1 ORDER BY created_at ASC`,
     [ownerId]
   );
@@ -835,16 +839,17 @@ async function getAccountsForOwner(ownerId) {
       name,
       "RUB",
       DEFAULT_ACCOUNT_COLOR,
+      0,
       true,
     ]);
     const placeholders = values
       .map(
         (_, idx) =>
-          `($${idx * 6 + 1}, $${idx * 6 + 2}, $${idx * 6 + 3}, $${idx * 6 + 4}, $${idx * 6 + 5}, $${idx * 6 + 6})`
+          `($${idx * 7 + 1}, $${idx * 7 + 2}, $${idx * 7 + 3}, $${idx * 7 + 4}, $${idx * 7 + 5}, $${idx * 7 + 6}, $${idx * 7 + 7})`
       )
       .join(",");
     await dbPool.query(
-      `INSERT INTO accounts (id, owner_id, name, currency_code, color, include_in_balance)
+      `INSERT INTO accounts (id, owner_id, name, currency_code, color, opening_balance, include_in_balance)
        VALUES ${placeholders}`,
       values.flat()
     );
@@ -853,6 +858,7 @@ async function getAccountsForOwner(ownerId) {
       name,
       currencyCode: "RUB",
       color: DEFAULT_ACCOUNT_COLOR,
+      openingBalance: 0,
       includeInBalance: true,
     }));
   }
@@ -861,6 +867,10 @@ async function getAccountsForOwner(ownerId) {
     name: row.name,
     currencyCode: row.currency_code || "RUB",
     color: row.color || DEFAULT_ACCOUNT_COLOR,
+    openingBalance:
+      row.opening_balance !== null && row.opening_balance !== undefined
+        ? Number(row.opening_balance)
+        : 0,
     includeInBalance: row.include_in_balance !== false,
   }));
 }
@@ -2406,6 +2416,7 @@ app.get("/api/accounts", async (req, res) => {
         name: acc.name,
         currencyCode: acc.currencyCode || "RUB",
         color: acc.color || DEFAULT_ACCOUNT_COLOR,
+        openingBalance: Number(acc.openingBalance || 0),
         includeInBalance: acc.includeInBalance !== false,
       }))
     );
@@ -2435,11 +2446,15 @@ app.post("/api/accounts", async (req, res) => {
       req.body?.includeInBalance === false || req.body?.includeInBalance === "false"
         ? false
         : true;
+    const openingBalanceRaw = Number(req.body?.openingBalance || 0);
+    const openingBalance = Number.isFinite(openingBalanceRaw) ? openingBalanceRaw : 0;
+    const openingBalanceRaw = Number(req.body?.openingBalance || 0);
+    const openingBalance = Number.isFinite(openingBalanceRaw) ? openingBalanceRaw : 0;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const existing = await dbPool.query(
-      `SELECT id, name, currency_code, color, include_in_balance
+      `SELECT id, name, currency_code, color, include_in_balance, opening_balance
        FROM accounts WHERE owner_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
       [owner.ownerId, name]
     );
@@ -2449,19 +2464,33 @@ app.post("/api/accounts", async (req, res) => {
         name: existing.rows[0].name,
         currencyCode: existing.rows[0].currency_code || "RUB",
         color: existing.rows[0].color || DEFAULT_ACCOUNT_COLOR,
+        openingBalance:
+          existing.rows[0].opening_balance !== null &&
+          existing.rows[0].opening_balance !== undefined
+            ? Number(existing.rows[0].opening_balance)
+            : 0,
         includeInBalance: existing.rows[0].include_in_balance !== false,
       });
     }
     const id = `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     await dbPool.query(
-      "INSERT INTO accounts (id, owner_id, name, currency_code, color, include_in_balance) VALUES ($1, $2, $3, $4, $5, $6)",
-      [id, owner.ownerId, name, allowedCurrency ? currencyCode : "RUB", color, includeInBalance]
+      "INSERT INTO accounts (id, owner_id, name, currency_code, color, opening_balance, include_in_balance) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [
+        id,
+        owner.ownerId,
+        name,
+        allowedCurrency ? currencyCode : "RUB",
+        color,
+        openingBalance,
+        includeInBalance,
+      ]
     );
     res.json({
       id,
       name,
       currencyCode: allowedCurrency ? currencyCode : "RUB",
       color,
+      openingBalance,
       includeInBalance,
     });
   } catch (err) {
@@ -2504,9 +2533,17 @@ app.put("/api/accounts/:id", async (req, res) => {
     const oldName = current.rows[0].name;
     await dbPool.query(
       `UPDATE accounts
-       SET name = $1, currency_code = $2, color = $3, include_in_balance = $4
-       WHERE id = $5 AND owner_id = $6`,
-      [name, allowedCurrency ? currencyCode : "RUB", color, includeInBalance, id, owner.ownerId]
+       SET name = $1, currency_code = $2, color = $3, opening_balance = $4, include_in_balance = $5
+       WHERE id = $6 AND owner_id = $7`,
+      [
+        name,
+        allowedCurrency ? currencyCode : "RUB",
+        color,
+        openingBalance,
+        includeInBalance,
+        id,
+        owner.ownerId,
+      ]
     );
     await dbPool.query(
       "UPDATE operations SET account = $1 WHERE telegram_user_id = $2 AND account = $3",
@@ -2517,6 +2554,7 @@ app.put("/api/accounts/:id", async (req, res) => {
       name,
       currencyCode: allowedCurrency ? currencyCode : "RUB",
       color,
+      openingBalance,
       includeInBalance,
     });
   } catch (err) {

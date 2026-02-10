@@ -106,9 +106,13 @@ function App() {
   const [newAccountName, setNewAccountName] = useState("");
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [editingAccountName, setEditingAccountName] = useState("");
+  const [editingAccountBalance, setEditingAccountBalance] = useState("");
+  const [newAccountBalance, setNewAccountBalance] = useState("");
+  const [showAccountEditPanel, setShowAccountEditPanel] = useState(false);
   const [accountEditor, setAccountEditor] = useState(null);
   const [accountDetail, setAccountDetail] = useState(null);
   const [operationEditor, setOperationEditor] = useState(null);
+  const [hideBottomNav, setHideBottomNav] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyPeriod, setHistoryPeriod] = useState("month");
   const [customRange, setCustomRange] = useState({ from: "", to: "" });
@@ -256,6 +260,37 @@ function App() {
   }, [telegramReady, initData, webUserId]);
 
   useEffect(() => {
+    const isEditable = (el) => {
+      if (!el) return false;
+      const tag = el.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
+      return !!el.isContentEditable;
+    };
+    let blurTimer = null;
+    const handleFocusIn = (event) => {
+      if (isEditable(event.target)) {
+        setHideBottomNav(true);
+      }
+    };
+    const handleFocusOut = () => {
+      if (blurTimer) clearTimeout(blurTimer);
+      blurTimer = setTimeout(() => {
+        const active = document.activeElement;
+        if (!isEditable(active)) {
+          setHideBottomNav(false);
+        }
+      }, 120);
+    };
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("focusout", handleFocusOut);
+    return () => {
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("focusout", handleFocusOut);
+      if (blurTimer) clearTimeout(blurTimer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedAccount && accounts.length) {
       setSelectedAccount(accounts[0].name);
     }
@@ -266,6 +301,9 @@ function App() {
       setAccountEditor(null);
       setEditingAccountId(null);
       setEditingAccountName("");
+      setEditingAccountBalance("");
+      setNewAccountBalance("");
+      setShowAccountEditPanel(false);
       setAccountDetail(null);
       setOperationEditor(null);
     }
@@ -288,6 +326,26 @@ function App() {
     setHistoryHasMore(true);
     loadAccountHistory(true);
   }, [historyPeriod, customRange.from, customRange.to, accountDetail?.id, initData, webUserId]);
+
+  useEffect(() => {
+    if (!accountEditor) return;
+    if (accountEditor.mode === "create") {
+      setNewAccountName("");
+      setNewAccountBalance("0");
+      setShowAccountEditPanel(true);
+      return;
+    }
+    const baseName = accountEditor.originalName || accountEditor.name;
+    const net = getAccountNet(baseName);
+    const currentBalance = Number(accountEditor.openingBalance || 0) + net;
+    setEditingAccountName(accountEditor.name || "");
+    setEditingAccountBalance(
+      Number.isFinite(currentBalance)
+        ? String(Math.round(currentBalance * 100) / 100)
+        : ""
+    );
+    setShowAccountEditPanel(false);
+  }, [accountEditor?.id, accountEditor?.mode, accountEditor?.openingBalance, operations]);
 
   const currencySymbolByCode = (code) => {
     const entry = currencyOptions.find((c) => c.code === code);
@@ -357,6 +415,15 @@ function App() {
     accounts.forEach((acc) => map.set(acc.id, acc));
     return map;
   }, [accounts]);
+
+  const getAccountNet = (name) => {
+    if (!name) return 0;
+    return operations.reduce((sum, op) => {
+      if (op.account !== name) return sum;
+      const value = Number(op.amount || 0);
+      return op.type === "income" ? sum + value : sum - value;
+    }, 0);
+  };
 
   async function saveOperation() {
     const trimmed = entryText.trim();
@@ -493,6 +560,7 @@ function App() {
         currencyCode: accountEditor?.currencyCode || settings.currencyCode,
         color: accountEditor?.color || "#0f172a",
         includeInBalance: accountEditor?.includeInBalance !== false,
+        openingBalance: Number(newAccountBalance || 0),
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -505,6 +573,7 @@ function App() {
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setAccounts((prev) => [...prev, data]);
       setNewAccountName("");
+      setNewAccountBalance("");
       setAccountEditor({ ...data, mode: "edit", originalName: data.name });
       await loadOperations();
     } catch (e) {
@@ -516,11 +585,17 @@ function App() {
     const name = editingAccountName.trim();
     if (!name) return;
     try {
+      const net = getAccountNet(accountEditor?.originalName || name);
+      const desiredBalance = Number(editingAccountBalance);
+      const openingBalance = Number.isFinite(desiredBalance)
+        ? desiredBalance - net
+        : accountEditor?.openingBalance || 0;
       const payload = {
         name,
         currencyCode: accountEditor?.currencyCode || settings.currencyCode,
         color: accountEditor?.color || "#0f172a",
         includeInBalance: accountEditor?.includeInBalance !== false,
+        openingBalance,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -540,6 +615,8 @@ function App() {
       await loadOperations();
       setEditingAccountId(null);
       setEditingAccountName("");
+      setEditingAccountBalance("");
+      setShowAccountEditPanel(false);
     } catch (e) {
       setError(e.message || "Ошибка обновления счета");
     }
@@ -627,6 +704,11 @@ function App() {
     accounts.forEach((acc) => {
       includeMap.set(acc.name, acc.includeInBalance !== false);
     });
+    let openingTotal = 0;
+    accounts.forEach((acc) => {
+      if (acc.includeInBalance === false) return;
+      openingTotal += Number(acc.openingBalance || 0);
+    });
     let income = 0;
     let expense = 0;
     operations.forEach((op) => {
@@ -641,7 +723,7 @@ function App() {
     return {
       income,
       expense,
-      balance: income - expense,
+      balance: openingTotal + income - expense,
       expenseCount: operations.filter((op) => op.type === "expense").length,
     };
   }, [operations, accounts]);
@@ -659,31 +741,52 @@ function App() {
       if (op.type === "income") bucket.income += value;
       else bucket.expense += value;
     });
-    const total = { income: summary.income, expense: summary.expense };
+    const includeMap = new Map();
+    accounts.forEach((acc) => {
+      includeMap.set(acc.name, acc.includeInBalance !== false);
+    });
+    let totalIncome = 0;
+    let totalExpense = 0;
+    operations.forEach((op) => {
+      const include = includeMap.has(op.account)
+        ? includeMap.get(op.account)
+        : true;
+      if (!include) return;
+      const value = Number(op.amount || 0);
+      if (op.type === "income") totalIncome += value;
+      else totalExpense += value;
+    });
+    let totalOpening = 0;
+    accounts.forEach((acc) => {
+      if (acc.includeInBalance === false) return;
+      totalOpening += Number(acc.openingBalance || 0);
+    });
     const items = [
       {
         key: "all",
         label: "Все счета",
-        income: total.income,
-        expense: total.expense,
-        balance: total.income - total.expense,
+        income: totalIncome,
+        expense: totalExpense,
+        balance: totalOpening + totalIncome - totalExpense,
       },
     ];
     accounts.forEach((acc) => {
       const value = map.get(acc.name) || { income: 0, expense: 0 };
+      const openingBalance = Number(acc.openingBalance || 0);
       items.push({
         key: acc.id,
         label: acc.name,
         income: value.income,
         expense: value.expense,
-        balance: value.income - value.expense,
+        balance: openingBalance + value.income - value.expense,
         color: acc.color,
         currencyCode: acc.currencyCode,
         includeInBalance: acc.includeInBalance !== false,
+        openingBalance,
       });
     });
     return items;
-  }, [accounts, operations, summary]);
+  }, [accounts, operations]);
 
   const accountTiles = useMemo(
     () => accountSummaries.filter((item) => item.key !== "all"),
@@ -718,7 +821,7 @@ function App() {
       month: "long",
       year: "numeric",
     });
-    return `Период: ${fmt.format(periodRange.start)} - ${fmt.format(periodRange.end)}`;
+    return `${fmt.format(periodRange.start)} - ${fmt.format(periodRange.end)}`;
   }, [periodRange]);
 
   const filteredHistory = useMemo(() => {
@@ -752,11 +855,14 @@ function App() {
     filteredHistory.forEach((op) => {
       const date = new Date(op.createdAt || op.date || op.created_at);
       const key = Number.isNaN(date.getTime()) ? "Без даты" : fmt.format(date);
+      const amount = Number(op.amount || 0);
+      const signed = op.type === "income" ? amount : -amount;
       if (key !== currentKey) {
         currentKey = key;
-        groups.push({ key, items: [op] });
+        groups.push({ key, items: [op], total: signed });
       } else {
         groups[groups.length - 1].items.push(op);
+        groups[groups.length - 1].total += signed;
       }
     });
     return groups;
@@ -868,9 +974,12 @@ function App() {
     if (operationEditor) {
       const isIncome = operationEditor.type === "income";
       const labelTitle = isIncome ? "Источник дохода" : "Наименование";
+      const operationPath = isIncome
+        ? `${operationEditor.label || "Источник"} → ${operationEditor.account || ""}`
+        : `${operationEditor.account || ""} → ${operationEditor.category || ""}`;
       return (
         <section className="card">
-          <div className="section-title">
+          <div className="section-title operation-title">
             <button
               className="link"
               onClick={() => {
@@ -879,7 +988,7 @@ function App() {
             >
               ← Назад
             </button>
-            <h2>Операция</h2>
+            <div className="operation-meta">{operationPath}</div>
           </div>
           <label className="label">{labelTitle}</label>
           <input
@@ -1040,6 +1149,8 @@ function App() {
       const accountExpense = accountOps
         .filter((op) => op.type === "expense")
         .reduce((sum, op) => sum + Number(op.amount || 0), 0);
+      const accountNet = accountIncome - accountExpense;
+      const accountBalance = Number(accountEditor?.openingBalance || 0) + accountNet;
       const accountCurrencySymbol = accountEditor
         ? currencySymbolByCode(accountEditor.currencyCode || settings.currencyCode)
         : settings.currencySymbol;
@@ -1055,53 +1166,102 @@ function App() {
                 setAccountEditor(null);
                 setEditingAccountId(null);
                 setEditingAccountName("");
+                setEditingAccountBalance("");
+                setNewAccountBalance("");
+                setShowAccountEditPanel(false);
               }}
             >
               Закрыть
             </button>
           </div>
-          <div className="row">
-            <input
-              className="input"
-              value={accountEditor.mode === "create" ? newAccountName : editingAccountName}
-              onChange={(e) => {
-                if (accountEditor.mode === "create") {
-                  setNewAccountName(e.target.value);
-                } else {
-                  setEditingAccountName(e.target.value);
-                }
-              }}
-              placeholder="Новый счет"
-            />
-            {accountEditor.mode === "create" ? (
+          {accountEditor.mode === "create" ? (
+            <div className="account-edit-panel">
+              <label className="label">Название счета</label>
+              <input
+                className="input"
+                value={newAccountName}
+                onChange={(e) => setNewAccountName(e.target.value)}
+                placeholder="Новый счет"
+              />
+              <label className="label">Текущий баланс</label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                value={newAccountBalance}
+                onChange={(e) => setNewAccountBalance(e.target.value)}
+                placeholder="0"
+              />
               <button className="btn" onClick={createAccount}>
                 Добавить
               </button>
-            ) : (
-              <button className="btn" onClick={() => updateAccount(accountEditor.id)}>
-                Сохранить
-              </button>
-            )}
-          </div>
-          {accountEditor.mode === "edit" && (
-            <div className="account-preview">
-              <div
-                className="account-preview-card"
-                style={{ background: accountEditor.color || "#0f172a" }}
-              >
-                <div className="balance-title">{accountEditor.name}</div>
-                <div className="balance-value">
-                  {formatMoney(
-                    accountOps.reduce((sum, op) => {
-                      const value = Number(op.amount || 0);
-                      return op.type === "income" ? sum + value : sum - value;
-                    }, 0),
-                    accountCurrencySymbol
-                  )}
+            </div>
+          ) : (
+            <>
+              <div className="account-preview">
+                <div
+                  className="account-preview-card large"
+                  style={{ background: accountEditor.color || "#0f172a" }}
+                >
+                  <button
+                    className="account-edit-icon"
+                    onClick={() => setShowAccountEditPanel(true)}
+                    aria-label="Редактировать счет"
+                  >
+                    ✎
+                  </button>
+                  <div className="balance-title">{accountEditor.name}</div>
+                  <div className="balance-value">
+                    {formatMoney(accountBalance, accountCurrencySymbol)}
+                  </div>
                 </div>
               </div>
-            </div>
+              {showAccountEditPanel && (
+                <div className="account-edit-panel">
+                  <label className="label">Название счета</label>
+                  <input
+                    className="input"
+                    value={editingAccountName}
+                    onChange={(e) => setEditingAccountName(e.target.value)}
+                    placeholder="Название счета"
+                  />
+                  <label className="label">Текущий баланс</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={editingAccountBalance}
+                    onChange={(e) => setEditingAccountBalance(e.target.value)}
+                    placeholder="0"
+                  />
+                  <div className="row">
+                    <button className="btn" onClick={() => updateAccount(accountEditor.id)}>
+                      Сохранить
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setShowAccountEditPanel(false)}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
+          <label className="toggle large">
+            <input
+              type="checkbox"
+              checked={accountEditor.includeInBalance !== false}
+              onChange={(e) =>
+                setAccountEditor((prev) => ({
+                  ...prev,
+                  includeInBalance: e.target.checked,
+                }))
+              }
+            />
+            Учитывать в общем балансе
+          </label>
           <div className="row">
             <label className="label">Валюта</label>
             <select
@@ -1139,56 +1299,15 @@ function App() {
               ))}
             </div>
           </div>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={accountEditor.includeInBalance !== false}
-              onChange={(e) =>
-                setAccountEditor((prev) => ({
-                  ...prev,
-                  includeInBalance: e.target.checked,
-                }))
-              }
-            />
-            Учитывать в общем балансе
-          </label>
+          {accountEditor.mode === "edit" && !showAccountEditPanel && (
+            <button className="btn" onClick={() => updateAccount(accountEditor.id)}>
+              Сохранить изменения
+            </button>
+          )}
           {accountEditor.mode === "edit" && (
             <button className="btn danger" onClick={() => deleteAccount(accountEditor.id)}>
               Удалить счет
             </button>
-          )}
-
-          {accountEditor.mode === "edit" && (
-            <>
-              <div className="overview-subtitle">История операций</div>
-              <ul className="list compact">
-                {accountOps.length === 0 ? (
-                  <li className="muted">Пока нет операций</li>
-                ) : (
-                  accountOps.slice(0, 6).map((op) => (
-                    <li key={op.id} className="analytics-row">
-                      <span>{op.label || op.text}</span>
-                      <strong>{formatMoney(op.amount, accountCurrencySymbol)}</strong>
-                    </li>
-                  ))
-                )}
-              </ul>
-              <div className="overview-subtitle">Отчеты</div>
-              <div className="overview-report">
-                <div>
-                  <div className="report-label">Доход</div>
-                  <div className="report-value">
-                    {formatMoney(accountIncome, accountCurrencySymbol)}
-                  </div>
-                </div>
-                <div>
-                  <div className="report-label">Расход</div>
-                  <div className="report-value">
-                    {formatMoney(accountExpense, accountCurrencySymbol)}
-                  </div>
-                </div>
-              </div>
-            </>
           )}
         </div>
       ) : null;
@@ -1221,7 +1340,7 @@ function App() {
                   setShowPeriodSheet(true);
                 }}
               >
-                {historyPeriodLabel}
+                Период
               </button>
             </div>
             {periodRangeText && (
@@ -1233,7 +1352,17 @@ function App() {
               ) : (
                 groupedHistory.map((group) => (
                   <div key={group.key} className="history-group">
-                    <div className="history-date">{group.key}</div>
+                    <div className="history-date-row">
+                      <div className="history-date">{group.key}</div>
+                      <div className="history-date-total">
+                        {formatMoney(
+                          group.total,
+                          currencySymbolByCode(
+                            accountDetail.currencyCode || settings.currencyCode
+                          )
+                        )}
+                      </div>
+                    </div>
                     <div className="history-rows">
                       {group.items.map((op) => (
                         <button
@@ -1286,6 +1415,7 @@ function App() {
                   currencyCode: accountDetail.currencyCode || settings.currencyCode,
                   color: accountDetail.color || "#0f172a",
                   includeInBalance: accountDetail.includeInBalance !== false,
+                  openingBalance: accountDetail.openingBalance || 0,
                 });
                 setEditingAccountId(accountDetail.id);
                 setEditingAccountName(accountDetail.name);
@@ -1337,6 +1467,7 @@ function App() {
                       currencyCode: acc.currencyCode || settings.currencyCode,
                       color: acc.color || "#0f172a",
                       includeInBalance: acc.includeInBalance !== false,
+                      openingBalance: acc.openingBalance || 0,
                     });
                   }}
                   style={{ background: acc.color || "#0f172a", color: "#fff" }}
@@ -1368,6 +1499,7 @@ function App() {
                     currencyCode: settings.currencyCode,
                     color: "#0f172a",
                     includeInBalance: true,
+                    openingBalance: 0,
                   });
                   setEditingAccountId(null);
                   setEditingAccountName("");
@@ -1809,7 +1941,7 @@ function App() {
           </div>
         </div>
       )}
-      {!accountEditor && !operationEditor && (
+      {!accountEditor && !operationEditor && !hideBottomNav && (
         <nav className="quick-actions">
           <button
             className={quickActive.home ? "quick-card active" : "quick-card"}
