@@ -1368,6 +1368,19 @@ app.post("/telegram/webhook", (req, res) => {
             callback_query_id: cq.id,
           });
           pendingOperations.delete(chatId);
+          return;
+        }
+        if (data === "onboard:yes") {
+          await telegramApi("answerCallbackQuery", {
+            callback_query_id: cq.id,
+          });
+          await telegramApi("sendMessage", {
+            chat_id: chatId,
+            text:
+              "Запиши мне голосовое или отправь текстовое сообщение, например: " +
+              '"Кофе 400 рублей, оплата картой".',
+          });
+          return;
         }
         return;
       }
