@@ -1333,6 +1333,16 @@
   gap: 6px;
 }
 
+.debt-alert.warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.debt-alert.overdue {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
 .debt-summary-amount {
   font-size: 20px;
   font-weight: 700;
@@ -1341,6 +1351,11 @@
 .debt-summary-sub {
   font-size: 12px;
   color: #64748b;
+}
+
+.debt-summary-next {
+  font-size: 12px;
+  color: #0f172a;
 }
 
 .debt-row {
