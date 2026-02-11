@@ -2445,7 +2445,20 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 });
 
 app.post("/api/operations", async (req, res) => {
-  const { text, category, account, type, amount, label, incomeSource, date } = req.body || {};
+  const {
+    text,
+    category,
+    account,
+    type,
+    amount,
+    label,
+    incomeSource,
+    date,
+    excludeFromSummary,
+    sourceType,
+    sourceId,
+    forceIncomeSourceNull,
+  } = req.body || {};
   const owner = getOwnerFromRequest(req);
   if (owner?.error) {
     return res.status(401).json({ error: "Invalid Telegram data" });
@@ -2480,21 +2493,21 @@ app.post("/api/operations", async (req, res) => {
     const incomeMatch = incomeNames.find(
       (name) => String(name).toLowerCase() === String(pickIncomeSourceName()).toLowerCase()
     );
+    const shouldForceIncomeSourceNull =
+      forceIncomeSourceNull === true || forceIncomeSourceNull === "true";
     const resolvedIncomeSource =
       typeValue === "income"
-        ? incomeMatch ||
-          incomeNames.find((name) =>
-            String(name).toLowerCase().includes("проч")
-          ) ||
-          incomeNames[0] ||
-          "Прочее"
+        ? shouldForceIncomeSourceNull
+          ? null
+          : incomeMatch ||
+            incomeNames.find((name) => String(name).toLowerCase().includes("проч")) ||
+            incomeNames[0] ||
+            "Прочее"
         : null;
     const resolvedCategory =
       typeValue === "income"
-        ? resolvedIncomeSource || "Прочее"
-        : category ||
-          categoriesList.find((c) => c.name)?.name ||
-          "Другое";
+        ? category || resolvedIncomeSource || "Прочее"
+        : category || categoriesList.find((c) => c.name)?.name || "Другое";
     const opLabel =
       String(label || "").trim() ||
       (typeValue === "income" ? resolvedIncomeSource : resolvedCategory) ||
@@ -2523,6 +2536,9 @@ app.post("/api/operations", async (req, res) => {
       account: accountName,
       accountSpecified: Boolean(accountMatch),
       incomeSource: resolvedIncomeSource,
+      excludeFromSummary: excludeFromSummary === true,
+      sourceType: sourceType || null,
+      sourceId: sourceId || null,
       createdAt: createdAt.toISOString(),
       telegramUserId: owner.ownerId,
     };

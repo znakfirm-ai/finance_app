@@ -409,6 +409,14 @@ function App() {
   const [debtDeleteAccount, setDebtDeleteAccount] = useState("");
   const [debtDeleteMessage, setDebtDeleteMessage] = useState("");
   const [debtDeleteTarget, setDebtDeleteTarget] = useState(null);
+  const [debtPaymentConfirm, setDebtPaymentConfirm] = useState(null);
+  const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
+  const [debtPaymentAccount, setDebtPaymentAccount] = useState("");
+  const [debtPaymentSplitMode, setDebtPaymentSplitMode] = useState("auto");
+  const [debtPaymentPrincipal, setDebtPaymentPrincipal] = useState("");
+  const [debtPaymentInterest, setDebtPaymentInterest] = useState("");
+  const [debtPaymentIncomeSource, setDebtPaymentIncomeSource] = useState("");
+  const [debtPaymentError, setDebtPaymentError] = useState("");
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
   const [goalTransferAccount, setGoalTransferAccount] = useState("");
@@ -468,6 +476,37 @@ function App() {
     setDebtDeleteOpen(false);
     setDebtDeleteTarget(null);
     setDebtDeleteMessage("");
+  };
+
+  const openDebtPaymentConfirm = (entry, debt) => {
+    if (!entry || !debt?.id) return;
+    if (entry.paid) return;
+    const accountName = accounts[0]?.name || "";
+    const defaultIncomeSource =
+      incomeSources.find((src) => src.name.toLowerCase().includes("инвест"))?.name ||
+      incomeSources[0]?.name ||
+      "";
+    const alreadyPaid = Number(entry.paidAmount || 0);
+    const remaining = Math.max(0, Number(entry.amount || 0) - alreadyPaid);
+    setDebtPaymentConfirm({ entry, debt });
+    setDebtPaymentAmount(String(remaining || ""));
+    setDebtPaymentAccount(accountName);
+    setDebtPaymentSplitMode("auto");
+    setDebtPaymentPrincipal("");
+    setDebtPaymentInterest("");
+    setDebtPaymentIncomeSource(defaultIncomeSource);
+    setDebtPaymentError("");
+  };
+
+  const closeDebtPaymentConfirm = () => {
+    setDebtPaymentConfirm(null);
+    setDebtPaymentAmount("");
+    setDebtPaymentAccount("");
+    setDebtPaymentSplitMode("auto");
+    setDebtPaymentPrincipal("");
+    setDebtPaymentInterest("");
+    setDebtPaymentIncomeSource("");
+    setDebtPaymentError("");
   };
 
   useEffect(() => {
@@ -575,7 +614,7 @@ function App() {
 
   async function loadOperations() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/operations")), {
+      const res = await fetch(apiUrl(withWebQuery("/api/operations?includeInternal=1")), {
         headers: authHeaders,
       });
       const data = await res.json();
@@ -598,6 +637,7 @@ function App() {
       } else if (incomeSourceDetail) {
         params.set("type", "income");
         params.set("incomeSource", incomeSourceDetail.name);
+        params.set("includeInternal", "1");
       } else if (categoryDetail) {
         params.set("type", "expense");
         params.set("category", categoryDetail.name);
@@ -620,7 +660,10 @@ function App() {
         headers: authHeaders,
       });
       const data = await res.json();
-      const items = Array.isArray(data) ? data : [];
+      let items = Array.isArray(data) ? data : [];
+      if (accountDetail) {
+        items = items.filter((item) => !item.excludeFromSummary);
+      }
       if (reset) {
         setHistoryItems(items);
       } else {
@@ -1179,6 +1222,11 @@ function App() {
     if (!cleaned) return null;
     const num = Number(cleaned);
     return Number.isFinite(num) ? num : null;
+  };
+
+  const roundMoney = (value) => {
+    const num = Number(value) || 0;
+    return Math.round(num * 100) / 100;
   };
 
   async function saveOperation() {
@@ -1807,6 +1855,147 @@ function App() {
     } catch (_) {}
   }
 
+  async function confirmDebtPayment() {
+    if (!debtPaymentConfirm?.entry || !debtPaymentConfirm?.debt?.id) return;
+    const entry = debtPaymentConfirm.entry;
+    const debt = debtPaymentConfirm.debt;
+    const amount = parseNumberInput(debtPaymentAmount);
+    const entryPaidAmount = Number(entry.paidAmount || 0);
+    const entryRemaining = Math.max(0, Number(entry.amount || 0) - entryPaidAmount);
+    if (!amount || amount <= 0) {
+      setDebtPaymentError("Введите сумму");
+      return;
+    }
+    if (!debtPaymentAccount) {
+      setDebtPaymentError("Выберите счет");
+      return;
+    }
+    if (amount > entryRemaining) {
+      setDebtPaymentError("Сумма больше остатка платежа");
+      return;
+    }
+    const interestTotal = Math.max(0, Number(debt.totalAmount || 0) - Number(debt.principalAmount || 0));
+    const paidTotal = Number(debt.paidTotal || 0);
+    const interestPaid = Math.min(paidTotal, interestTotal);
+    const interestRemaining = Math.max(0, interestTotal - interestPaid);
+    const principalTotal = Math.max(0, Number(debt.principalAmount || 0));
+    const principalPaid = Math.max(0, paidTotal - interestPaid);
+    const principalRemaining = Math.max(0, principalTotal - principalPaid);
+    let principalPart = amount;
+    let interestPart = 0;
+    if (interestTotal > 0) {
+      if (debtPaymentSplitMode === "manual") {
+        const manualPrincipal = parseNumberInput(debtPaymentPrincipal);
+        const manualInterest = parseNumberInput(debtPaymentInterest);
+        if (
+          manualPrincipal === null ||
+          manualInterest === null ||
+          manualPrincipal < 0 ||
+          manualInterest < 0
+        ) {
+          setDebtPaymentError("Укажите тело и проценты");
+          return;
+        }
+        if (roundMoney(manualPrincipal + manualInterest) !== roundMoney(amount)) {
+          setDebtPaymentError("Сумма тела и процентов не совпадает");
+          return;
+        }
+        if (manualInterest > interestRemaining) {
+          setDebtPaymentError("Проценты больше остатка");
+          return;
+        }
+        if (manualPrincipal > principalRemaining) {
+          setDebtPaymentError("Тело больше остатка");
+          return;
+        }
+        principalPart = manualPrincipal;
+        interestPart = manualInterest;
+      } else {
+        interestPart = Math.min(amount, interestRemaining);
+        principalPart = roundMoney(amount - interestPart);
+      }
+      if (interestPart > 0 && !debtPaymentIncomeSource) {
+        setDebtPaymentError("Выберите источник дохода для процентов");
+        return;
+      }
+    }
+
+    const mainOpPayload = {
+      type: debt.kind === "owed_to_me" ? "income" : "expense",
+      amount,
+      account: debtPaymentAccount,
+      label: `Платеж по долгу: ${debt.name}`,
+      category: debt.kind === "owed_to_me" ? "Долги" : "Долги",
+      forceIncomeSourceNull: true,
+      sourceType: "debt_payment",
+      sourceId: debt.id,
+    };
+    if (webUserId) mainOpPayload.webUserId = webUserId;
+    if (initData) mainOpPayload.initData = initData;
+
+    try {
+      const opRes = await fetch(apiUrl(withWebQuery("/api/operations")), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(mainOpPayload),
+      });
+      const opData = await opRes.json();
+      if (!opRes.ok) throw new Error(opData?.error || "Ошибка операции");
+
+      if (interestPart > 0) {
+        const interestPayload = {
+          type: "income",
+          amount: interestPart,
+          account: debtPaymentAccount,
+          label: `Проценты по долгу: ${debt.name}`,
+          incomeSource: debtPaymentIncomeSource,
+          excludeFromSummary: true,
+          sourceType: "debt_interest",
+          sourceId: debt.id,
+        };
+        if (webUserId) interestPayload.webUserId = webUserId;
+        if (initData) interestPayload.initData = initData;
+        const interestRes = await fetch(apiUrl(withWebQuery("/api/operations")), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify(interestPayload),
+        });
+        const interestData = await interestRes.json();
+        if (!interestRes.ok) throw new Error(interestData?.error || "Ошибка процентов");
+      }
+
+      const nextPaidAmount = roundMoney(entryPaidAmount + amount);
+      const fullyPaid = nextPaidAmount >= Number(entry.amount || 0);
+      const updatePayload = {
+        amount: entry.amount,
+        dueDate: entry.dueDate || null,
+        note: entry.note || "",
+        paid: fullyPaid,
+        paidAmount: fullyPaid ? Number(entry.amount || 0) : nextPaidAmount,
+      };
+      if (webUserId) updatePayload.webUserId = webUserId;
+      if (initData) updatePayload.initData = initData;
+      const scheduleRes = await fetch(
+        apiUrl(withWebQuery(`/api/debts/${entry.debtId}/schedule/${entry.id}`)),
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify(updatePayload),
+        }
+      );
+      const scheduleData = await scheduleRes.json();
+      if (!scheduleRes.ok) throw new Error(scheduleData?.error || "Ошибка платежа");
+
+      closeDebtPaymentConfirm();
+      await loadDebtSchedule(entry.debtId);
+      await loadAllDebts();
+      await loadOperations();
+      await loadHistory(true);
+    } catch (e) {
+      setDebtPaymentError(e.message || "Ошибка");
+    }
+  }
+
   async function deleteDebtScheduleEntry(entry) {
     if (!entry?.debtId || !entry?.id) return;
     if (!confirm("Удалить платеж?")) return;
@@ -2143,9 +2332,9 @@ function App() {
   const incomeByCategory = useMemo(() => {
     const totals = {};
     operations.forEach((op) => {
-      if (op.excludeFromSummary) return;
       if (op.type !== "income") return;
-      const key = op.incomeSource || op.category || "Прочее";
+      if (!op.incomeSource) return;
+      const key = op.incomeSource;
       totals[key] = (totals[key] || 0) + Number(op.amount || 0);
     });
     return Object.entries(totals).sort((a, b) => b[1] - a[1]);
@@ -2155,9 +2344,9 @@ function App() {
     const totals = new Map();
     incomeSources.forEach((src) => totals.set(src.name, 0));
     operations.forEach((op) => {
-      if (op.excludeFromSummary) return;
       if (op.type !== "income") return;
-      const key = op.incomeSource || op.category || "Прочее";
+      if (!op.incomeSource) return;
+      const key = op.incomeSource;
       totals.set(key, (totals.get(key) || 0) + Number(op.amount || 0));
     });
     return incomeSources.map((src) => ({
@@ -2217,6 +2406,7 @@ function App() {
       map.set(acc.name, { income: 0, expense: 0 });
     });
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       const acc = op.account || accounts[0]?.name || "Наличные";
       if (!map.has(acc)) return;
       const bucket = map.get(acc);
@@ -3731,10 +3921,15 @@ function App() {
                             <input
                               type="checkbox"
                               checked={entry.paid}
-                              onChange={(e) => toggleDebtSchedulePaid(
-                                { ...entry, debtId: debtDetail.id },
-                                e.target.checked
-                              )}
+                              onChange={(e) => {
+                                if (entry.paid) return;
+                                if (e.target.checked) {
+                                  openDebtPaymentConfirm(
+                                    { ...entry, debtId: debtDetail.id },
+                                    debtDetail
+                                  );
+                                }
+                              }}
                             />
                           </label>
                           <button
@@ -3755,9 +3950,13 @@ function App() {
                             <span className="history-label">
                               {entry.note || "Платеж"}
                             </span>
-                            <span className="history-meta">
-                              {entry.paid ? "Оплачено" : "Ожидается"}
-                            </span>
+                          <span className="history-meta">
+                            {entry.paid
+                              ? "Оплачено"
+                              : entry.paidAmount
+                                ? "Частично"
+                                : "Ожидается"}
+                          </span>
                           </button>
                           <span
                             className={`history-amount ${
@@ -3807,6 +4006,111 @@ function App() {
               Удалить
             </button>
             {debtDeleteTarget?.id === debtDetail.id ? debtDeletePanel : null}
+            {debtPaymentConfirm?.debt?.id === debtDetail.id && (
+              <div className="goal-delete">
+                <div className="goal-delete-panel">
+                  <div className="label">Подтвердить зачисление</div>
+                  <label className="label">Сумма платежа</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={debtPaymentAmount}
+                    onChange={(e) => setDebtPaymentAmount(e.target.value)}
+                  />
+                  <label className="label">Счет</label>
+                  {accounts.length ? (
+                    <select
+                      className="select"
+                      value={debtPaymentAccount}
+                      onChange={(e) => setDebtPaymentAccount(e.target.value)}
+                    >
+                      {accounts.map((acc) => (
+                        <option key={acc.id} value={acc.name}>
+                          {acc.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="muted">Нет счетов</div>
+                  )}
+                  {Number(debtDetail.totalAmount || 0) >
+                    Number(debtDetail.principalAmount || 0) && (
+                    <>
+                      <label className="label">Разделение платежа</label>
+                      <div className="goal-delete-choice">
+                        <button
+                          className={`btn ${
+                            debtPaymentSplitMode === "auto" ? "" : "ghost"
+                          }`}
+                          onClick={() => setDebtPaymentSplitMode("auto")}
+                        >
+                          Раздели автоматически
+                        </button>
+                        <button
+                          className={`btn ${
+                            debtPaymentSplitMode === "manual" ? "" : "ghost"
+                          }`}
+                          onClick={() => setDebtPaymentSplitMode("manual")}
+                        >
+                          Разделю сам
+                        </button>
+                      </div>
+                      {debtPaymentSplitMode === "manual" && (
+                        <>
+                          <label className="label">Тело</label>
+                          <input
+                            className="input"
+                            type="number"
+                            step="0.01"
+                            value={debtPaymentPrincipal}
+                            onChange={(e) => setDebtPaymentPrincipal(e.target.value)}
+                          />
+                          <label className="label">Проценты</label>
+                          <input
+                            className="input"
+                            type="number"
+                            step="0.01"
+                            value={debtPaymentInterest}
+                            onChange={(e) => setDebtPaymentInterest(e.target.value)}
+                          />
+                        </>
+                      )}
+                      <label className="label">Источник дохода (проценты)</label>
+                      {incomeSources.length ? (
+                        <select
+                          className="select"
+                          value={debtPaymentIncomeSource}
+                          onChange={(e) => setDebtPaymentIncomeSource(e.target.value)}
+                        >
+                          {incomeSources.map((src) => (
+                            <option key={src.id} value={src.name}>
+                              {src.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="muted">Нет источников дохода</div>
+                      )}
+                      {debtPaymentIncomeSource ? (
+                        <div className="muted">
+                          Проценты будут записаны в доходы: {debtPaymentIncomeSource}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                  {debtPaymentError && <div className="error">{debtPaymentError}</div>}
+                  <div className="row">
+                    <button className="btn" onClick={confirmDebtPayment}>
+                      Подтвердить
+                    </button>
+                    <button className="btn ghost" onClick={closeDebtPaymentConfirm}>
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         );
       }
