@@ -371,6 +371,10 @@ function App() {
   const [goalNotifyTime, setGoalNotifyTime] = useState("");
   const [goalErrors, setGoalErrors] = useState({});
   const [goalSaveMessage, setGoalSaveMessage] = useState("");
+  const [goalDeleteOpen, setGoalDeleteOpen] = useState(false);
+  const [goalDeleteMode, setGoalDeleteMode] = useState("transfer");
+  const [goalDeleteAccount, setGoalDeleteAccount] = useState("");
+  const [goalDeleteMessage, setGoalDeleteMessage] = useState("");
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
   const [goalTransferAccount, setGoalTransferAccount] = useState("");
@@ -731,6 +735,10 @@ function App() {
     setGoalSaveMessage("");
     setGoalErrors({});
     setGoalNotifyOpen(false);
+    setGoalDeleteOpen(false);
+    setGoalDeleteMode("transfer");
+    setGoalDeleteAccount("");
+    setGoalDeleteMessage("");
     if (goalEditor.mode === "create") {
       setGoalName("");
       setGoalTarget("");
@@ -1322,6 +1330,44 @@ function App() {
       setTimeout(() => setGoalSaveMessage(""), 2000);
     } catch (e) {
       setError(e.message || "Ошибка обновления цели");
+    }
+  }
+
+  async function deleteGoal(id) {
+    if (!id) return;
+    if (goalDeleteMode === "transfer" && accounts.length && !goalDeleteAccount) {
+      setGoalDeleteMessage("Выберите счет");
+      return;
+    }
+    try {
+      const payload = {
+        mode: goalDeleteMode,
+        transferAccount: goalDeleteMode === "transfer" ? goalDeleteAccount || null : null,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(withWebQuery(`/api/goals/${id}`)), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setGoals((prev) => prev.filter((g) => g.id !== id));
+      if (goalDetail?.id === id) {
+        setGoalDetail(null);
+      }
+      if (goalEditor?.id === id) {
+        setGoalEditor(null);
+      }
+      setGoalDeleteOpen(false);
+      setGoalDeleteMessage("");
+      await loadGoals();
+      await loadAccounts();
+      await loadOperations();
+      await loadHistory(true);
+    } catch (e) {
+      setGoalDeleteMessage(e.message || "Ошибка удаления цели");
     }
   }
 
@@ -2664,6 +2710,76 @@ function App() {
             </div>
           </div>
           {goalSaveMessage && <div className="status success">{goalSaveMessage}</div>}
+          {goalEditor.mode === "edit" && (
+            <div className="goal-delete">
+              <button
+                className="btn danger"
+                onClick={() => setGoalDeleteOpen((prev) => !prev)}
+              >
+                Удалить цель
+              </button>
+              {goalDeleteOpen && (
+                <div className="goal-delete-panel">
+                  <div className="label">Что сделать с остатком?</div>
+                  <div className="goal-delete-choice">
+                    <button
+                      className={`btn ${goalDeleteMode === "transfer" ? "" : "ghost"}`}
+                      onClick={() => {
+                        setGoalDeleteMode("transfer");
+                        setGoalDeleteMessage("");
+                      }}
+                    >
+                      Перевести на счет
+                    </button>
+                    <button
+                      className={`btn ${goalDeleteMode === "zero" ? "" : "ghost"}`}
+                      onClick={() => {
+                        setGoalDeleteMode("zero");
+                        setGoalDeleteMessage("");
+                      }}
+                    >
+                      Обнулить
+                    </button>
+                  </div>
+                  {goalDeleteMode === "transfer" && (
+                    <>
+                      {accounts.length ? (
+                        <select
+                          className="select"
+                          value={goalDeleteAccount}
+                          onChange={(e) => setGoalDeleteAccount(e.target.value)}
+                        >
+                          <option value="">Выберите счет</option>
+                          {accounts.map((acc) => (
+                            <option key={acc.id} value={acc.name}>
+                              {acc.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="muted">Нет счетов для перевода</div>
+                      )}
+                    </>
+                  )}
+                  {goalDeleteMessage && <div className="error">{goalDeleteMessage}</div>}
+                  <div className="row">
+                    <button
+                      className="btn danger"
+                      onClick={() => deleteGoal(goalEditor.id)}
+                    >
+                      Удалить
+                    </button>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setGoalDeleteOpen(false)}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : null;
 

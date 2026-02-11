@@ -3642,6 +3642,94 @@ app.put("/api/goals/:id", async (req, res) => {
   }
 });
 
+app.delete("/api/goals/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const goalRow = await dbPool.query(
+      "SELECT name FROM goals WHERE id = $1 AND owner_id = $2",
+      [id, owner.ownerId]
+    );
+    if (!goalRow.rows.length) {
+      return res.status(404).json({ error: "Goal not found" });
+    }
+    const goalName = goalRow.rows[0]?.name || "Цель";
+    const mode = String(req.body?.mode || "zero").toLowerCase();
+    const transferAccount = String(req.body?.transferAccount || "").trim();
+    if (mode === "transfer" && !transferAccount) {
+      return res.status(400).json({ error: "Account is required" });
+    }
+    if (mode === "transfer" && transferAccount) {
+      const accountCheck = await dbPool.query(
+        "SELECT id FROM accounts WHERE owner_id = $1 AND name = $2",
+        [owner.ownerId, transferAccount]
+      );
+      if (!accountCheck.rows.length) {
+        return res.status(400).json({ error: "Account not found" });
+      }
+    }
+    const total = await getGoalTotal(owner.ownerId, id);
+    const client = await dbPool.connect();
+    let transferred = 0;
+    try {
+      await client.query("BEGIN");
+      if (mode === "transfer" && transferAccount && total > 0) {
+        const opId = `op_goal_close_${id}_${Date.now()}`;
+        await upsertGoalTransferOperation(client, {
+          opId,
+          ownerId: owner.ownerId,
+          account: transferAccount,
+          type: "income",
+          amount: total,
+          createdAt: new Date().toISOString(),
+          goalName,
+          sourceId: `goal_close_${id}`,
+        });
+        transferred = total;
+      }
+      await client.query(
+        `DELETE FROM operations
+         WHERE telegram_user_id = $1
+           AND source_type = 'goal'
+           AND source_id IN (
+             SELECT id FROM goal_transactions WHERE goal_id = $2 AND owner_id = $1
+           )`,
+        [owner.ownerId, id]
+      );
+      await client.query(
+        "DELETE FROM goal_transactions WHERE goal_id = $1 AND owner_id = $2",
+        [id, owner.ownerId]
+      );
+      await client.query("DELETE FROM goals WHERE id = $1 AND owner_id = $2", [
+        id,
+        owner.ownerId,
+      ]);
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true, transferred });
+  } catch (err) {
+    console.error("Delete goal failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete goal" });
+  }
+});
+
 app.get("/api/goals/:id/transactions", async (req, res) => {
   try {
     const owner = getOwnerFromRequest(req);
