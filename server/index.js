@@ -398,6 +398,7 @@ async function listOperations({
   type = null,
   incomeSource = null,
   category = null,
+  includeInternal = false,
   search = null,
   before = null,
   from = null,
@@ -503,6 +504,9 @@ async function listOperations({
   }
   if (where.length) {
     query += ` WHERE ${where.join(" AND ")}`;
+  }
+  if (!includeInternal) {
+    query += where.length ? " AND exclude_from_summary = false" : " WHERE exclude_from_summary = false";
   }
   params.push(limit);
   query += ` ORDER BY created_at DESC LIMIT $${params.length}`;
@@ -2731,6 +2735,9 @@ app.get("/api/operations", async (req, res) => {
     const incomeSource = req.query?.incomeSource
       ? String(req.query.incomeSource)
       : null;
+    const includeInternal =
+      req.query?.includeInternal === "1" ||
+      req.query?.includeInternal === "true";
     const parseDateParam = (value) => {
       if (!value) return null;
       const date = new Date(value);
@@ -2747,6 +2754,7 @@ app.get("/api/operations", async (req, res) => {
       type,
       category,
       incomeSource,
+      includeInternal,
       search,
       before,
       from,

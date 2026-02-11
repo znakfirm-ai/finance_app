@@ -504,6 +504,7 @@ function App() {
       params.set("limit", searchQuery ? "500" : "50");
       if (accountDetail) {
         params.set("account", accountDetail.name);
+        params.set("includeInternal", "1");
       } else if (incomeSourceDetail) {
         params.set("type", "income");
         params.set("incomeSource", incomeSourceDetail.name);
