@@ -1429,11 +1429,9 @@
 .debt-card-divider,
 .debt-summary-divider {
   width: 100%;
-  text-align: center;
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: #cbd5e1;
-  line-height: 1;
+  border-top: 1px dashed #cbd5e1;
+  height: 0;
+  margin: 6px 0;
 }
 
 .history-amount {

@@ -3684,7 +3684,7 @@ function App() {
                       )}`
                     : "—"}
                 </div>
-                <div className="debt-summary-divider">- - - - - - - - -</div>
+                <div className="debt-summary-divider" />
                 <div className="debt-summary-next">
                   Дата возврата:{" "}
                   {debtDetail.dueDate ? formatDisplayDate(debtDetail.dueDate) : "—"}
@@ -3909,7 +3909,7 @@ function App() {
                               : ""}
                           </span>
                         </div>
-                        <div className="debt-card-divider">- - - - - - - - -</div>
+                        <div className="debt-card-divider" />
                         <div className="debt-card-meta-line">
                           <span>Дата возврата:</span>
                           <span>
