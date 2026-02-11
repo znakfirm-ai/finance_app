@@ -2029,6 +2029,8 @@ function App() {
 
   const totalsByCategory = useMemo(() => {
     const totals = {};
+    // Business rule: income sources (incomeSource) are analytics-only and must NOT affect balance.
+    // Only operations excluded via excludeFromSummary are ignored; balance is based on account ops.
     operations.forEach((op) => {
       if (op.excludeFromSummary) return;
       if (op.type !== "expense") return;
