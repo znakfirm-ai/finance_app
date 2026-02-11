@@ -1703,8 +1703,11 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       await loadAllDebts();
+      if (data?.id) {
+        await loadDebtSchedule(data.id);
+        setDebtDetail({ ...data, kind: data.kind || debtEditor?.kind });
+      }
       setDebtEditor(null);
-      setDebtDetail(null);
     } catch (e) {
       setDebtEditorMessage(e.message || "Ошибка");
     }
