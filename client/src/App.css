@@ -123,6 +123,16 @@
   color: #111827;
 }
 
+.btn.active {
+  background: #111827;
+  color: #ffffff;
+}
+
+.btn.ghost.active {
+  background: #111827;
+  color: #ffffff;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
