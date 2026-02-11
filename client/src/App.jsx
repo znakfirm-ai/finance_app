@@ -1536,10 +1536,8 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       await loadAllDebts();
-      setDebtEditor({ ...data, mode: "edit", kind: debtEditor?.kind });
-      setDebtDetail({ ...data, kind: debtEditor?.kind });
-      setDebtEditorMessage("Сохранено");
-      setTimeout(() => setDebtEditorMessage(""), 2000);
+      setDebtEditor(null);
+      setDebtDetail(null);
     } catch (e) {
       setDebtEditorMessage(e.message || "Ошибка");
     }
