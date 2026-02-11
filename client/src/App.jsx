@@ -417,6 +417,8 @@ function App() {
   const [debtPaymentInterest, setDebtPaymentInterest] = useState("");
   const [debtPaymentIncomeSource, setDebtPaymentIncomeSource] = useState("");
   const [debtPaymentError, setDebtPaymentError] = useState("");
+  const [debtPaymentWarning, setDebtPaymentWarning] = useState("");
+  const [debtPaymentAllowMismatch, setDebtPaymentAllowMismatch] = useState(false);
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
   const [goalTransferAccount, setGoalTransferAccount] = useState("");
@@ -496,6 +498,8 @@ function App() {
     setDebtPaymentInterest("");
     setDebtPaymentIncomeSource(defaultIncomeSource);
     setDebtPaymentError("");
+    setDebtPaymentWarning("");
+    setDebtPaymentAllowMismatch(false);
   };
 
   const closeDebtPaymentConfirm = () => {
@@ -507,6 +511,8 @@ function App() {
     setDebtPaymentInterest("");
     setDebtPaymentIncomeSource("");
     setDebtPaymentError("");
+    setDebtPaymentWarning("");
+    setDebtPaymentAllowMismatch(false);
   };
 
   const buildDebtScheduleSplits = (debt, scheduleItems) => {
@@ -1905,6 +1911,7 @@ function App() {
       setDebtPaymentError("Введите сумму");
       return;
     }
+    setDebtPaymentError("");
     if (!debtPaymentAccount) {
       setDebtPaymentError("Выберите счет");
       return;
@@ -1955,16 +1962,12 @@ function App() {
           setDebtPaymentError("Укажите тело и проценты");
           return;
         }
-        if (roundMoney(manualPrincipal + manualInterest) !== roundMoney(amount)) {
-          setDebtPaymentError("Сумма тела и процентов не совпадает");
-          return;
-        }
-        if (manualInterest > entryInterestRemaining) {
-          setDebtPaymentError("Проценты больше остатка");
-          return;
-        }
-        if (manualPrincipal > entryPrincipalRemaining) {
-          setDebtPaymentError("Тело больше остатка");
+        const manualSum = roundMoney(manualPrincipal + manualInterest);
+        const amountRounded = roundMoney(amount);
+        if (manualSum !== amountRounded && !debtPaymentAllowMismatch) {
+          setDebtPaymentWarning(
+            "Сумма тела и процентов не совпадает с суммой платежа. Подтвердить операцию?"
+          );
           return;
         }
         principalPart = manualPrincipal;
@@ -1991,6 +1994,7 @@ function App() {
         return;
       }
     }
+    setDebtPaymentWarning("");
 
     const mainOpPayload = {
       type: debt.kind === "owed_to_me" ? "income" : "expense",
@@ -4186,6 +4190,31 @@ function App() {
                     </>
                   )}
                   {debtPaymentError && <div className="error">{debtPaymentError}</div>}
+                  {debtPaymentWarning && (
+                    <div className="warning">
+                      {debtPaymentWarning}
+                      <div className="row">
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            setDebtPaymentAllowMismatch(true);
+                            confirmDebtPayment();
+                          }}
+                        >
+                          Подтвердить операцию
+                        </button>
+                        <button
+                          className="btn ghost"
+                          onClick={() => {
+                            setDebtPaymentWarning("");
+                            setDebtPaymentAllowMismatch(false);
+                          }}
+                        >
+                          Отмена
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="row">
                     <button className="btn" onClick={confirmDebtPayment}>
                       Подтвердить

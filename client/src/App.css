@@ -162,6 +162,15 @@
   color: #b91c1c;
   font-size: 14px;
 }
+.warning {
+  color: #92400e;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  margin-top: 10px;
+}
 
 .list {
   list-style: none;
