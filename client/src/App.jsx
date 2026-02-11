@@ -1252,9 +1252,9 @@ function App() {
         targetDate: goalDate || null,
         color: goalColor || "#0f172a",
         notify: goalNotify === true,
-        notifyFrequency: goalNotify ? goalNotifyFrequency : null,
-        notifyStartDate: goalNotify ? goalNotifyStartDate || null : null,
-        notifyTime: goalNotify ? goalNotifyTime || null : null,
+        notifyFrequency: goalNotifyFrequency || null,
+        notifyStartDate: goalNotifyStartDate || null,
+        notifyTime: goalNotifyTime || null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -1301,9 +1301,9 @@ function App() {
         targetDate: goalDate || null,
         color: goalColor || "#0f172a",
         notify: goalNotify === true,
-        notifyFrequency: goalNotify ? goalNotifyFrequency : null,
-        notifyStartDate: goalNotify ? goalNotifyStartDate || null : null,
-        notifyTime: goalNotify ? goalNotifyTime || null : null,
+        notifyFrequency: goalNotifyFrequency || null,
+        notifyStartDate: goalNotifyStartDate || null,
+        notifyTime: goalNotifyTime || null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -1323,6 +1323,8 @@ function App() {
           color: data.color,
           targetDate: data.targetDate,
           notify: data.notify,
+          notifyFrequency: data.notifyFrequency || null,
+          notifyStartDate: data.notifyStartDate || null,
           notifyTime: data.notifyTime || null,
         }));
       }

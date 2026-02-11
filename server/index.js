@@ -3519,8 +3519,7 @@ app.post("/api/goals", async (req, res) => {
       : null;
     const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
     const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
-    const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
-    const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
+    const notifyTime = parseNotifyTime(req.body?.notifyTime);
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
@@ -3591,6 +3590,7 @@ app.put("/api/goals/:id", async (req, res) => {
       : null;
     const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
     const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
+    const notifyTime = parseNotifyTime(req.body?.notifyTime);
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
