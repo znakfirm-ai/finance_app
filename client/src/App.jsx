@@ -401,7 +401,6 @@ function App() {
   const [debtPaymentType, setDebtPaymentType] = useState("annuity");
   const [debtPaymentsCount, setDebtPaymentsCount] = useState("");
   const [debtScheduleEnabled, setDebtScheduleEnabled] = useState(true);
-  const [debtFirstPaymentDate, setDebtFirstPaymentDate] = useState("");
   const [debtFrequency, setDebtFrequency] = useState("monthly");
   const [debtNotes, setDebtNotes] = useState("");
   const [debtCurrencyCode, setDebtCurrencyCode] = useState("RUB");
@@ -847,16 +846,15 @@ function App() {
     setDebtEditorMessage("");
     if (debtEditor.mode === "create") {
       setDebtName("");
-      setDebtPrincipal("");
-      setDebtTotal("");
-      setDebtIssuedDate("");
-      setDebtDueDate("");
-      setDebtRate("");
-      setDebtTermMonths("");
+    setDebtPrincipal("");
+    setDebtTotal("");
+    setDebtIssuedDate("");
+    setDebtDueDate(formatDateInput(new Date()));
+    setDebtRate("");
+    setDebtTermMonths("");
     setDebtPaymentType("annuity");
     setDebtPaymentsCount("");
     setDebtScheduleEnabled(true);
-    setDebtFirstPaymentDate(formatDateInput(new Date()));
     setDebtFrequency("monthly");
     setDebtNotes("");
     setDebtCurrencyCode(settings.currencyCode || "RUB");
@@ -890,9 +888,6 @@ function App() {
         : ""
     );
     setDebtScheduleEnabled(debtEditor.scheduleEnabled !== false);
-    setDebtFirstPaymentDate(
-      debtEditor.firstPaymentDate ? formatDateInput(debtEditor.firstPaymentDate) : ""
-    );
     setDebtFrequency(debtEditor.frequency || "monthly");
     setDebtNotes(debtEditor.notes || "");
     setDebtCurrencyCode(debtEditor.currencyCode || settings.currencyCode || "RUB");
@@ -1527,6 +1522,11 @@ function App() {
       setDebtEditorMessage("Введите название");
       return;
     }
+    const isOwed = debtEditor?.kind === "owed_to_me";
+    if (isOwed && debtScheduleEnabled && (!debtIssuedDate || !debtDueDate)) {
+      setDebtEditorMessage("Укажи дату выдачи и дату возврата");
+      return;
+    }
     const principalAmount = parseNumberInput(debtPrincipal) ?? 0;
     const totalAmount = parseNumberInput(debtTotal) ?? 0;
     const rate = parseNumberInput(debtRate);
@@ -1544,7 +1544,6 @@ function App() {
       paymentType: debtPaymentType,
       paymentsCount: paymentsCount ?? null,
       scheduleEnabled: debtScheduleEnabled,
-      firstPaymentDate: debtFirstPaymentDate || null,
       frequency: debtFrequency,
       notes: debtNotes || "",
       currencyCode: debtCurrencyCode || null,
@@ -1573,6 +1572,11 @@ function App() {
       setDebtEditorMessage("Введите название");
       return;
     }
+    const isOwed = debtEditor?.kind === "owed_to_me";
+    if (isOwed && debtScheduleEnabled && (!debtIssuedDate || !debtDueDate)) {
+      setDebtEditorMessage("Укажи дату выдачи и дату возврата");
+      return;
+    }
     const principalAmount = parseNumberInput(debtPrincipal) ?? 0;
     const totalAmount = parseNumberInput(debtTotal) ?? 0;
     const rate = parseNumberInput(debtRate);
@@ -1590,7 +1594,6 @@ function App() {
       paymentType: debtPaymentType,
       paymentsCount: paymentsCount ?? null,
       scheduleEnabled: debtScheduleEnabled,
-      firstPaymentDate: debtFirstPaymentDate || null,
       frequency: debtFrequency,
       notes: debtNotes || "",
       currencyCode: debtCurrencyCode || null,
@@ -3375,6 +3378,12 @@ function App() {
                   value={debtTermMonths}
                   onChange={(e) => setDebtTermMonths(e.target.value)}
                 />
+                <label className="label">Дата возврата</label>
+                <DateSlotPicker
+                  value={debtDueDate || formatDateInput(new Date())}
+                  ariaLabel="Дата возврата"
+                  onChange={(value) => setDebtDueDate(value)}
+                />
                 <label className="label">График платежей</label>
                 <label className="toggle">
                   <input
@@ -3386,20 +3395,6 @@ function App() {
                 </label>
                 {debtScheduleEnabled && (
                   <>
-                    <label className="label">Дата первого платежа</label>
-                    <DateSlotPicker
-                      value={debtFirstPaymentDate || formatDateInput(new Date())}
-                      ariaLabel="Дата первого платежа"
-                      onChange={(value) => setDebtFirstPaymentDate(value)}
-                    />
-                    <label className="label">Кол-во платежей</label>
-                    <input
-                      className="input"
-                      type="number"
-                      step="1"
-                      value={debtPaymentsCount}
-                      onChange={(e) => setDebtPaymentsCount(e.target.value)}
-                    />
                     <label className="label">Периодичность</label>
                     <select
                       className="select"

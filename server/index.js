@@ -954,6 +954,63 @@ function addDays(baseDate, count) {
   return date;
 }
 
+function normalizeDateOnly(value) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addInterval(baseDate, frequency) {
+  if (frequency === "daily") return addDays(baseDate, 1);
+  if (frequency === "weekly") return addDays(baseDate, 7);
+  if (frequency === "quarterly") return addMonths(baseDate, 3);
+  return addMonths(baseDate, 1);
+}
+
+function generateScheduleByDates({ totalAmount, issuedDate, dueDate, frequency = "monthly" }) {
+  const total = roundMoney(totalAmount);
+  if (!total) return [];
+  let start = normalizeDateOnly(issuedDate);
+  let end = normalizeDateOnly(dueDate);
+  if (!start || !end) return [];
+  if (end < start) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  const dates = [];
+  let current = addInterval(start, frequency);
+  if (!current || Number.isNaN(current.getTime())) return [];
+  while (current <= end) {
+    dates.push(current);
+    current = addInterval(current, frequency);
+    if (dates.length > 2000) break;
+  }
+  if (!dates.length) {
+    dates.push(end);
+  } else {
+    const last = dates[dates.length - 1];
+    if (last.getTime() !== end.getTime()) {
+      dates.push(end);
+    }
+  }
+  const uniqueDates = [];
+  const seen = new Set();
+  dates.forEach((date) => {
+    const key = date.toISOString().slice(0, 10);
+    if (seen.has(key)) return;
+    seen.add(key);
+    uniqueDates.push(date);
+  });
+  const count = Math.max(1, uniqueDates.length);
+  const base = roundMoney(total / count);
+  let remainder = roundMoney(total - base * count);
+  return uniqueDates.map((date, idx) => ({
+    dueDate: date,
+    amount: idx === count - 1 ? roundMoney(base + remainder) : base,
+  }));
+}
+
 function generateEqualSchedule({
   totalAmount,
   paymentsCount,
@@ -4374,12 +4431,18 @@ app.post("/api/debts", async (req, res) => {
     const notes = String(req.body?.notes || "").trim();
     if (!dbPool) return res.status(400).json({ error: "Database unavailable" });
     const id = `debt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const issuedBase =
+      issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate : new Date();
+    const computedDueDate =
+      dueDate && !Number.isNaN(dueDate.getTime())
+        ? dueDate
+        : Number.isFinite(termMonths)
+          ? addMonths(issuedBase, termMonths)
+          : null;
     const scheduleBaseDate =
       firstPaymentDate && !Number.isNaN(firstPaymentDate.getTime())
         ? firstPaymentDate
-        : issuedDate && !Number.isNaN(issuedDate.getTime())
-          ? issuedDate
-          : new Date();
+        : issuedBase;
     let schedule = [];
     if (!scheduleEnabled) {
       schedule = [];
@@ -4393,14 +4456,25 @@ app.post("/api/debts", async (req, res) => {
       });
     } else if (totalAmount || principalAmount) {
       const baseAmount = totalAmount || principalAmount;
-      schedule = generateEqualSchedule({
-        totalAmount: baseAmount,
-        paymentsCount: Number.isFinite(paymentsCount) ? paymentsCount : termMonths || 1,
-        firstPaymentDate: scheduleBaseDate,
-        frequency: ["daily", "weekly", "monthly", "quarterly"].includes(frequency)
-          ? frequency
-          : "monthly",
-      });
+      if (computedDueDate) {
+        schedule = generateScheduleByDates({
+          totalAmount: baseAmount,
+          issuedDate: issuedBase,
+          dueDate: computedDueDate,
+          frequency: ["daily", "weekly", "monthly", "quarterly"].includes(frequency)
+            ? frequency
+            : "monthly",
+        });
+      } else {
+        schedule = generateEqualSchedule({
+          totalAmount: baseAmount,
+          paymentsCount: Number.isFinite(paymentsCount) ? paymentsCount : termMonths || 1,
+          firstPaymentDate: scheduleBaseDate,
+          frequency: ["daily", "weekly", "monthly", "quarterly"].includes(frequency)
+            ? frequency
+            : "monthly",
+        });
+      }
     }
     const client = await dbPool.connect();
     try {
@@ -4419,13 +4493,17 @@ app.post("/api/debts", async (req, res) => {
           totalAmount || principalAmount,
           currencyCode,
           scheduleEnabled,
-          Number.isFinite(paymentsCount) ? paymentsCount : null,
+          Number.isFinite(paymentsCount)
+            ? paymentsCount
+            : schedule.length
+              ? schedule.length
+              : null,
           frequency || null,
           firstPaymentDate && !Number.isNaN(firstPaymentDate.getTime())
             ? firstPaymentDate.toISOString()
-            : null,
-          issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate.toISOString() : null,
-          dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+            : issuedBase.toISOString(),
+          issuedBase.toISOString(),
+          computedDueDate ? computedDueDate.toISOString() : null,
           Number.isFinite(rate) ? rate : null,
           Number.isFinite(termMonths) ? termMonths : null,
           paymentType || null,
@@ -4501,6 +4579,14 @@ app.put("/api/debts/:id", async (req, res) => {
     const firstPaymentDate = req.body?.firstPaymentDate
       ? new Date(req.body.firstPaymentDate)
       : null;
+    const issuedBase =
+      issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate : new Date();
+    const computedDueDate =
+      dueDate && !Number.isNaN(dueDate.getTime())
+        ? dueDate
+        : Number.isFinite(termMonths)
+          ? addMonths(issuedBase, termMonths)
+          : null;
     if (!dbPool) return res.status(400).json({ error: "Database unavailable" });
     const result = await dbPool.query(
       `UPDATE debts
@@ -4532,9 +4618,9 @@ app.put("/api/debts/:id", async (req, res) => {
         frequency || null,
         firstPaymentDate && !Number.isNaN(firstPaymentDate.getTime())
           ? firstPaymentDate.toISOString()
-          : null,
-        issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate.toISOString() : null,
-        dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+          : issuedBase.toISOString(),
+        issuedBase.toISOString(),
+        computedDueDate ? computedDueDate.toISOString() : null,
         Number.isFinite(rate) ? rate : null,
         Number.isFinite(termMonths) ? termMonths : null,
         paymentType || null,
@@ -4551,6 +4637,87 @@ app.put("/api/debts/:id", async (req, res) => {
         id,
         owner.ownerId,
       ]);
+    } else {
+      let schedule = [];
+      if (kind === "credit") {
+        schedule = generateCreditSchedule({
+          principal: principalAmount || totalAmount,
+          rate: Number.isFinite(rate) ? rate : 0,
+          termMonths: Number.isFinite(termMonths) ? termMonths : paymentsCount || 1,
+          firstPaymentDate: issuedBase,
+          paymentType: paymentType === "diff" ? "diff" : "annuity",
+        });
+      } else if (totalAmount || principalAmount) {
+        const baseAmount = totalAmount || principalAmount;
+        if (computedDueDate) {
+          schedule = generateScheduleByDates({
+            totalAmount: baseAmount,
+            issuedDate: issuedBase,
+            dueDate: computedDueDate,
+            frequency: ["daily", "weekly", "monthly", "quarterly"].includes(frequency)
+              ? frequency
+              : "monthly",
+          });
+        } else {
+          schedule = generateEqualSchedule({
+            totalAmount: baseAmount,
+            paymentsCount: Number.isFinite(paymentsCount) ? paymentsCount : termMonths || 1,
+            firstPaymentDate: issuedBase,
+            frequency: ["daily", "weekly", "monthly", "quarterly"].includes(frequency)
+              ? frequency
+              : "monthly",
+          });
+        }
+      }
+      const { rows: existing } = await dbPool.query(
+        `SELECT due_date, paid, paid_amount, paid_at
+         FROM debt_schedule
+         WHERE debt_id = $1 AND owner_id = $2`,
+        [id, owner.ownerId]
+      );
+      const existingMap = new Map();
+      existing.forEach((row) => {
+        if (!row.due_date) return;
+        const key = new Date(row.due_date).toISOString().slice(0, 10);
+        existingMap.set(key, row);
+      });
+      await dbPool.query("DELETE FROM debt_schedule WHERE debt_id = $1 AND owner_id = $2", [
+        id,
+        owner.ownerId,
+      ]);
+      if (schedule.length) {
+        const values = schedule.map((entry, idx) => {
+          const dateKey = entry.dueDate
+            ? new Date(entry.dueDate).toISOString().slice(0, 10)
+            : null;
+          const existingEntry = dateKey ? existingMap.get(dateKey) : null;
+          return [
+            `sched_${id}_${idx}`,
+            id,
+            owner.ownerId,
+            entry.dueDate && !Number.isNaN(entry.dueDate.getTime())
+              ? entry.dueDate.toISOString()
+              : null,
+            roundMoney(entry.amount),
+            existingEntry?.paid === true,
+            existingEntry?.paid_amount !== null && existingEntry?.paid_amount !== undefined
+              ? Number(existingEntry.paid_amount)
+              : null,
+            existingEntry?.paid_at || null,
+          ];
+        });
+        const placeholders = values
+          .map(
+            (_, idx) =>
+              `($${idx * 8 + 1}, $${idx * 8 + 2}, $${idx * 8 + 3}, $${idx * 8 + 4}, $${idx * 8 + 5}, $${idx * 8 + 6}, $${idx * 8 + 7}, $${idx * 8 + 8})`
+          )
+          .join(",");
+        await dbPool.query(
+          `INSERT INTO debt_schedule (id, debt_id, owner_id, due_date, amount, paid, paid_amount, paid_at)
+           VALUES ${placeholders}`,
+          values.flat()
+        );
+      }
     }
     const items = await listDebtsForOwner(owner.ownerId, kind);
     const updated = items.find((item) => item.id === id);
