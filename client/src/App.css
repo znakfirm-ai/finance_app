@@ -1402,6 +1402,30 @@
   color: #6b7280;
 }
 
+.debt-card-meta {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.debt-card-meta-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.debt-summary-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
 .history-amount {
   font-size: 13px;
   font-weight: 700;

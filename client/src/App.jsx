@@ -3674,17 +3674,21 @@ function App() {
               <div className="debt-summary-amount">
                 {formatMoney(debtDetail.remaining, debtCurrencySymbol)}
               </div>
-              {debtDetail.nextPaymentDate && debtDetail.nextPaymentAmount !== null && (
+              <div className="debt-summary-meta">
                 <div className="debt-summary-next">
-                  Следующий платеж: {formatDisplayDate(debtDetail.nextPaymentDate)} —{" "}
-                  {formatMoney(debtDetail.nextPaymentAmount, debtCurrencySymbol)}
+                  Следующий платеж:{" "}
+                  {debtDetail.nextPaymentDate && debtDetail.nextPaymentAmount !== null
+                    ? `${formatDisplayDate(debtDetail.nextPaymentDate)} — ${formatMoney(
+                        debtDetail.nextPaymentAmount,
+                        debtCurrencySymbol
+                      )}`
+                    : "—"}
                 </div>
-              )}
-              {debtDetail.dueDate && (
                 <div className="debt-summary-next">
-                  Дата возврата: {formatDisplayDate(debtDetail.dueDate)}
+                  Дата возврата:{" "}
+                  {debtDetail.dueDate ? formatDisplayDate(debtDetail.dueDate) : "—"}
                 </div>
-              )}
+              </div>
               <div className="goal-progress">
                 <div
                   className="goal-progress-fill"
@@ -3892,14 +3896,24 @@ function App() {
                         </span>
                       </div>
                       <div className="debt-card-meta">
-                        Следующий платеж:{" "}
-                        {item.nextPaymentDate
-                          ? formatDisplayDate(item.nextPaymentDate)
-                          : "—"}
-                        {item.nextPaymentAmount !== null &&
-                        item.nextPaymentAmount !== undefined
-                          ? ` · ${formatMoney(item.nextPaymentAmount, debtCurrencySymbol)}`
-                          : ""}
+                        <div className="debt-card-meta-line">
+                          <span>Следующий платеж:</span>
+                          <span>
+                            {item.nextPaymentDate
+                              ? formatDisplayDate(item.nextPaymentDate)
+                              : "—"}
+                            {item.nextPaymentAmount !== null &&
+                            item.nextPaymentAmount !== undefined
+                              ? ` · ${formatMoney(item.nextPaymentAmount, debtCurrencySymbol)}`
+                              : ""}
+                          </span>
+                        </div>
+                        <div className="debt-card-meta-line">
+                          <span>Дата возврата:</span>
+                          <span>
+                            {item.dueDate ? formatDisplayDate(item.dueDate) : "—"}
+                          </span>
+                        </div>
                       </div>
                       <div className="goal-progress">
                         <div
