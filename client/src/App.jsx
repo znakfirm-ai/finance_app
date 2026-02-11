@@ -324,6 +324,7 @@ function App() {
   const [categories, setCategories] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [incomeSources, setIncomeSources] = useState([]);
+  const [goals, setGoals] = useState([]);
   const [currencyOptions, setCurrencyOptions] = useState([]);
   const [settings, setSettings] = useState({ currencyCode: "RUB", currencySymbol: "₽" });
   const [historyFilter, setHistoryFilter] = useState({
@@ -357,6 +358,17 @@ function App() {
   const [accountDetail, setAccountDetail] = useState(null);
   const [incomeSourceEditor, setIncomeSourceEditor] = useState(null);
   const [incomeSourceDetail, setIncomeSourceDetail] = useState(null);
+  const [goalEditor, setGoalEditor] = useState(null);
+  const [goalDetail, setGoalDetail] = useState(null);
+  const [goalName, setGoalName] = useState("");
+  const [goalTarget, setGoalTarget] = useState("");
+  const [goalDate, setGoalDate] = useState("");
+  const [goalColor, setGoalColor] = useState("#0f172a");
+  const [goalNotify, setGoalNotify] = useState(false);
+  const [goalSaveMessage, setGoalSaveMessage] = useState("");
+  const [goalTransfer, setGoalTransfer] = useState(null);
+  const [goalTransferAmount, setGoalTransferAmount] = useState("");
+  const [goalTransferMessage, setGoalTransferMessage] = useState("");
   const [editingIncomeSourceName, setEditingIncomeSourceName] = useState("");
   const [incomeSourceSaveMessage, setIncomeSourceSaveMessage] = useState("");
   const [operationEditor, setOperationEditor] = useState(null);
@@ -453,6 +465,16 @@ function App() {
     } catch (_) {}
   }
 
+  async function loadGoals() {
+    try {
+      const res = await fetch(apiUrl(withWebQuery("/api/goals")), {
+        headers: authHeaders,
+      });
+      const data = await res.json();
+      setGoals(Array.isArray(data) ? data : []);
+    } catch (_) {}
+  }
+
   async function loadOperations() {
     try {
       const res = await fetch(apiUrl(withWebQuery("/api/operations")), {
@@ -464,7 +486,7 @@ function App() {
   }
 
   async function loadHistory(reset = true) {
-    const target = accountDetail || incomeSourceDetail || categoryDetail;
+    const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
     if (!target) return;
     if (historyLoading) return;
     setHistoryLoading(true);
@@ -492,7 +514,10 @@ function App() {
         params.set("from", range.start.toISOString());
         params.set("to", range.end.toISOString());
       }
-      const res = await fetch(apiUrl(withWebQuery(`/api/operations?${params}`)), {
+      const endpoint = goalDetail
+        ? `/api/goals/${goalDetail.id}/transactions?${params}`
+        : `/api/operations?${params}`;
+      const res = await fetch(apiUrl(withWebQuery(endpoint)), {
         headers: authHeaders,
       });
       const data = await res.json();
@@ -535,6 +560,7 @@ function App() {
     loadCategories();
     loadAccounts();
     loadIncomeSources();
+    loadGoals();
     loadOperations();
   }, [telegramReady, initData, webUserId]);
 
@@ -599,7 +625,7 @@ function App() {
   }, [view]);
 
   useEffect(() => {
-    const target = accountDetail || incomeSourceDetail || categoryDetail;
+    const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
     if (!target) return;
     setHistoryBefore(null);
     setHistoryHasMore(true);
@@ -609,7 +635,14 @@ function App() {
     setCustomRange({ from: "", to: "" });
     setCustomRangeDraft({ from: "", to: "" });
     setShowCustomRange(false);
-  }, [accountDetail?.id, incomeSourceDetail?.id, categoryDetail?.id, initData, webUserId]);
+  }, [
+    accountDetail?.id,
+    incomeSourceDetail?.id,
+    categoryDetail?.id,
+    goalDetail?.id,
+    initData,
+    webUserId,
+  ]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -619,7 +652,7 @@ function App() {
   }, [historyQuery]);
 
   useEffect(() => {
-    const target = accountDetail || incomeSourceDetail || categoryDetail;
+    const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
     if (!target) return;
     setHistoryBefore(null);
     setHistoryHasMore(true);
@@ -632,6 +665,7 @@ function App() {
     accountDetail?.id,
     incomeSourceDetail?.id,
     categoryDetail?.id,
+    goalDetail?.id,
     initData,
     webUserId,
   ]);
@@ -682,6 +716,43 @@ function App() {
         : ""
     );
   }, [categoryEditor?.id, categoryEditor?.mode, categoryEditor?.name]);
+
+  useEffect(() => {
+    if (!goalEditor) return;
+    setGoalSaveMessage("");
+    if (goalEditor.mode === "create") {
+      setGoalName("");
+      setGoalTarget("");
+      setGoalDate("");
+      setGoalColor("#0f172a");
+      setGoalNotify(false);
+      return;
+    }
+    setGoalName(goalEditor.name || "");
+    setGoalTarget(
+      goalEditor.targetAmount !== null && goalEditor.targetAmount !== undefined
+        ? String(goalEditor.targetAmount)
+        : ""
+    );
+    setGoalDate(goalEditor.targetDate ? formatDateInput(goalEditor.targetDate) : "");
+    setGoalColor(goalEditor.color || "#0f172a");
+    setGoalNotify(goalEditor.notify === true);
+  }, [goalEditor?.id, goalEditor?.mode, goalEditor?.name]);
+
+  useEffect(() => {
+    if (!goalDetail) return;
+    const latest = goals.find((g) => g.id === goalDetail.id);
+    if (!latest) return;
+    setGoalDetail((prev) => ({
+      ...prev,
+      name: latest.name,
+      targetAmount: latest.targetAmount,
+      color: latest.color,
+      targetDate: latest.targetDate,
+      notify: latest.notify === true,
+      total: latest.total,
+    }));
+  }, [goals, goalDetail?.id]);
 
   const currencySymbolByCode = (code) => {
     const entry = currencyOptions.find((c) => c.code === code);
@@ -1124,6 +1195,103 @@ function App() {
     }
   }
 
+  async function createGoal() {
+    const name = goalName.trim();
+    if (!name) return;
+    try {
+      const targetAmount = parseNumberInput(goalTarget) ?? 0;
+      const payload = {
+        name,
+        targetAmount,
+        targetDate: goalDate || null,
+        color: goalColor || "#0f172a",
+        notify: goalNotify === true,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl("/api/goals"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setGoals((prev) => [...prev, data]);
+      setGoalEditor({ ...data, mode: "edit" });
+      setGoalDetail({ ...data });
+      setGoalSaveMessage("Цель создана");
+      setTimeout(() => setGoalSaveMessage(""), 2000);
+    } catch (e) {
+      setError(e.message || "Ошибка создания цели");
+    }
+  }
+
+  async function updateGoal(id) {
+    const name = goalName.trim();
+    if (!name) return;
+    try {
+      const targetAmount = parseNumberInput(goalTarget) ?? 0;
+      const payload = {
+        name,
+        targetAmount,
+        targetDate: goalDate || null,
+        color: goalColor || "#0f172a",
+        notify: goalNotify === true,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(`/api/goals/${id}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, ...data } : g)));
+      if (goalDetail?.id === id) {
+        setGoalDetail((prev) => ({
+          ...prev,
+          name: data.name,
+          targetAmount: data.targetAmount,
+          color: data.color,
+          targetDate: data.targetDate,
+          notify: data.notify,
+        }));
+      }
+      setGoalSaveMessage("Сохранено");
+      setTimeout(() => setGoalSaveMessage(""), 2000);
+    } catch (e) {
+      setError(e.message || "Ошибка обновления цели");
+    }
+  }
+
+  async function addGoalTransaction(goalId, type) {
+    const amount = parseNumberInput(goalTransferAmount);
+    if (!goalId || !amount) return;
+    try {
+      const payload = {
+        amount,
+        type,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(apiUrl(`/api/goals/${goalId}/transactions`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setGoalTransferAmount("");
+      setGoalTransferMessage(type === "income" ? "Пополнение сохранено" : "Изъятие сохранено");
+      setTimeout(() => setGoalTransferMessage(""), 2000);
+      await loadGoals();
+      await loadHistory(true);
+    } catch (e) {
+      setError(e.message || "Ошибка операции по цели");
+    }
+  }
+
   async function updateAccount(id) {
     const name = editingAccountName.trim();
     if (!name) return;
@@ -1500,16 +1668,24 @@ function App() {
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
   const incomePages = Math.max(1, Math.ceil(incomeSourceTotals.length / 4));
   const categoryPages = Math.max(1, Math.ceil(categoryTotals.length / 4));
-  const goalPlaceholders = [
-    { id: "goal-1", name: "Подушка", amount: 0 },
-    { id: "goal-2", name: "Отпуск", amount: 0 },
-  ];
+  const goalTiles = goals.map((goal) => {
+    const targetAmount = Number(goal.targetAmount || 0);
+    const currentAmount = Number(goal.total || 0);
+    const progress =
+      targetAmount > 0 ? Math.min(1, Math.max(0, currentAmount / targetAmount)) : 0;
+    return {
+      ...goal,
+      targetAmount,
+      currentAmount,
+      progress,
+    };
+  });
   const debtPlaceholders = [
     { id: "debt-1", name: "Должны мне", amount: 0, tone: "positive" },
     { id: "debt-2", name: "Должен я", amount: 0, tone: "negative" },
     { id: "debt-3", name: "Кредиты", amount: 0, tone: "neutral" },
   ];
-  const goalPages = Math.max(1, Math.ceil((goalPlaceholders.length + 1) / 4));
+  const goalPages = Math.max(1, Math.ceil((goalTiles.length + 1) / 4));
   const debtPages = Math.max(1, Math.ceil((debtPlaceholders.length + 1) / 4));
 
   const updateBalanceArrows = () => {
@@ -1593,6 +1769,16 @@ function App() {
     });
     const symbol = symbolOverride || settings.currencySymbol || "₽";
     return `${formatted} ${symbol}`;
+  };
+
+  const formatDisplayDate = (value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(date);
   };
 
   const formatSignedMoney = (value, type, symbolOverride) => {
@@ -2162,6 +2348,250 @@ function App() {
         return <section className="overview-shell">{categoryEditorView}</section>;
       }
 
+      const goalEditorView = goalEditor ? (
+        <div className="overview-manage">
+          <div className="overview-manage-header">
+            <div className="overview-manage-title">
+              {goalEditor.mode === "create" ? "Новая цель" : "Цель"}
+            </div>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setGoalEditor(null);
+                setGoalSaveMessage("");
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+          <div className="account-edit-panel">
+            <label className="label">Название цели</label>
+            <input
+              className="input"
+              value={goalName}
+              onChange={(e) => setGoalName(e.target.value)}
+              placeholder="Например: Отпуск"
+            />
+            <label className="label">Сумма цели</label>
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={goalTarget}
+              onChange={(e) => setGoalTarget(e.target.value)}
+              placeholder="0"
+            />
+            <label className="label">Срок</label>
+            <input
+              className="input"
+              type="date"
+              value={goalDate}
+              onChange={(e) => setGoalDate(e.target.value)}
+            />
+            <div className="row">
+              <label className="label">Цвет</label>
+              <div className="color-row">
+                {accountColors.map((color) => (
+                  <button
+                    key={color}
+                    className={goalColor === color ? "color-dot active" : "color-dot"}
+                    style={{ background: color }}
+                    onClick={() => setGoalColor(color)}
+                  />
+                ))}
+              </div>
+            </div>
+            <label className="toggle large">
+              <input
+                type="checkbox"
+                checked={goalNotify}
+                onChange={(e) => setGoalNotify(e.target.checked)}
+              />
+              Уведомления
+            </label>
+            <div className="row">
+              <button
+                className="btn"
+                onClick={() =>
+                  goalEditor.mode === "create"
+                    ? createGoal()
+                    : updateGoal(goalEditor.id)
+                }
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+          {goalSaveMessage && <div className="status success">{goalSaveMessage}</div>}
+        </div>
+      ) : null;
+
+      if (goalEditorView) {
+        return <section className="overview-shell">{goalEditorView}</section>;
+      }
+
+      if (goalDetail) {
+        const progress =
+          goalDetail.targetAmount > 0
+            ? Math.min(1, Math.max(0, (goalDetail.total || 0) / goalDetail.targetAmount))
+            : 0;
+        return (
+          <section className="overview-shell">
+            <div className="overview-manage-header">
+              <div className="overview-manage-title">{goalDetail.name}</div>
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setGoalDetail(null);
+                  setGoalTransfer(null);
+                  setGoalTransferAmount("");
+                }}
+              >
+                Закрыть
+              </button>
+            </div>
+            <div
+              className="goal-detail-card"
+              style={{ background: goalDetail.color || "#0f172a" }}
+            >
+              <div className="goal-detail-name">{goalDetail.name}</div>
+              <div className="goal-detail-amount">
+                {formatMoney(goalDetail.total || 0)} /{" "}
+                {formatMoney(goalDetail.targetAmount || 0)}
+              </div>
+              {goalDetail.targetDate && (
+                <div className="goal-detail-date">
+                  до {formatDisplayDate(goalDetail.targetDate)}
+                </div>
+              )}
+              <div className="goal-progress">
+                <div
+                  className="goal-progress-fill"
+                  style={{ width: `${Math.round(progress * 100)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="row">
+              <input
+                className="input"
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Поиск по названию или сумме"
+              />
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setCustomRangeDraft(customRange);
+                  setShowCustomRange(historyPeriod === "custom");
+                  setShowPeriodSheet(true);
+                }}
+              >
+                Период
+              </button>
+            </div>
+            {periodRangeText && (
+              <div className="history-range">{periodRangeText}</div>
+            )}
+
+            <div className="row">
+              <button
+                className="btn"
+                onClick={() => {
+                  setGoalTransfer({ goalId: goalDetail.id, type: "income" });
+                  setGoalTransferAmount("");
+                  setGoalTransferMessage("");
+                }}
+              >
+                Пополнить
+              </button>
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setGoalTransfer({ goalId: goalDetail.id, type: "expense" });
+                  setGoalTransferAmount("");
+                  setGoalTransferMessage("");
+                }}
+              >
+                Изъять
+              </button>
+            </div>
+
+            {goalTransfer && goalTransfer.goalId === goalDetail.id && (
+              <div className="goal-transfer">
+                <label className="label">
+                  {goalTransfer.type === "income" ? "Сумма пополнения" : "Сумма изъятия"}
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={goalTransferAmount}
+                  onChange={(e) => setGoalTransferAmount(e.target.value)}
+                />
+                <button
+                  className="btn"
+                  onClick={() => addGoalTransaction(goalDetail.id, goalTransfer.type)}
+                >
+                  Сохранить
+                </button>
+                {goalTransferMessage && (
+                  <div className="status success">{goalTransferMessage}</div>
+                )}
+              </div>
+            )}
+
+            <div className="history-list" ref={historyListRef} onScroll={handleHistoryScroll}>
+              {groupedHistory.length === 0 ? (
+                <div className="muted">Пока нет операций</div>
+              ) : (
+                groupedHistory.map((group) => (
+                  <div key={group.key} className="history-group">
+                    <div className="history-date-row">
+                      <div className="history-date">{group.key}</div>
+                    </div>
+                    <div className="history-rows">
+                      {group.items.map((op) => (
+                        <div key={op.id} className="history-row">
+                          <div className="history-row-main">
+                            <span className="history-emoji">
+                              {op.labelEmoji || "🎯"}
+                            </span>
+                            <span className="history-label">{op.label}</span>
+                          </div>
+                          <span
+                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                          >
+                            {formatSignedMoney(op.amount, op.type, settings.currencySymbol)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button
+              className="btn ghost"
+              onClick={() =>
+                setGoalEditor({
+                  id: goalDetail.id,
+                  name: goalDetail.name,
+                  targetAmount: goalDetail.targetAmount || 0,
+                  targetDate: goalDetail.targetDate || "",
+                  color: goalDetail.color || "#0f172a",
+                  notify: goalDetail.notify === true,
+                  mode: "edit",
+                })
+              }
+            >
+              Редактировать цель
+            </button>
+          </section>
+        );
+      }
+
       if (categoryDetail) {
         return (
           <section className="overview-shell">
@@ -2555,6 +2985,7 @@ function App() {
                     }
                     setIncomeSourceDetail(null);
                     setCategoryDetail(null);
+                    setGoalDetail(null);
                     setAccountDetail({
                       id: acc.key,
                       name: acc.label,
@@ -2591,6 +3022,7 @@ function App() {
                     setIncomeSourceEditor(null);
                     setIncomeSourceDetail(null);
                     setCategoryDetail(null);
+                    setGoalDetail(null);
                     setAccountEditor({
                       mode: "create",
                       name: "",
@@ -2628,13 +3060,14 @@ function App() {
                   <button
                     key={src.id}
                     className="overview-tile income"
-                    onClick={() => {
+                  onClick={() => {
                     if (incomeSourceDetail?.id === src.id) {
                       setIncomeSourceDetail(null);
                       return;
                     }
                     setAccountDetail(null);
                     setCategoryDetail(null);
+                    setGoalDetail(null);
                     setIncomeSourceDetail({ id: src.id, name: src.name });
                   }}
                   >
@@ -2661,6 +3094,7 @@ function App() {
                     });
                     setIncomeSourceDetail(null);
                     setCategoryDetail(null);
+                    setGoalDetail(null);
                     setEditingIncomeSourceName("");
                     setNewIncomeSourceName("");
                   }}
@@ -2702,6 +3136,7 @@ function App() {
                       }
                       setAccountDetail(null);
                       setIncomeSourceDetail(null);
+                      setGoalDetail(null);
                       setCategoryDetail({
                         id: cat.id,
                         name: cat.name,
@@ -2738,6 +3173,7 @@ function App() {
                       originalName: "",
                     });
                     setCategoryDetail(null);
+                    setGoalDetail(null);
                     setEditingCategoryName("");
                     setNewCategoryName("");
                   }}
@@ -2760,16 +3196,79 @@ function App() {
                 <div className="overview-subtitle">Цели</div>
               </div>
               <div className="overview-carousel compact">
-                {goalPlaceholders.map((goal) => (
-                  <div key={goal.id} className="overview-tile compact placeholder goal">
+                {goalTiles.map((goal) => (
+                  <div
+                    key={goal.id}
+                    className="overview-tile compact goal-card"
+                    onClick={() => {
+                      setAccountDetail(null);
+                      setIncomeSourceDetail(null);
+                      setCategoryDetail(null);
+                      setGoalDetail({
+                        id: goal.id,
+                        name: goal.name,
+                        targetAmount: goal.targetAmount,
+                        color: goal.color || "#0f172a",
+                        targetDate: goal.targetDate || null,
+                        notify: goal.notify === true,
+                        total: goal.currentAmount,
+                      });
+                    }}
+                  >
                     <div className="overview-icon">
                       <IconTarget />
                     </div>
                     <div className="overview-name">{goal.name}</div>
-                    <div className="overview-amount">{formatMoney(goal.amount)}</div>
+                    <div className="goal-progress">
+                      <div
+                        className="goal-progress-fill"
+                        style={{
+                          width: `${Math.round(goal.progress * 100)}%`,
+                          background: goal.color || "#0f172a",
+                        }}
+                      />
+                    </div>
+                    <div className="goal-amount">
+                      {formatMoney(goal.currentAmount)} / {formatMoney(goal.targetAmount)}
+                    </div>
+                    {goal.targetDate && (
+                      <div className="goal-deadline">
+                        до {formatDisplayDate(goal.targetDate)}
+                      </div>
+                    )}
+                    <button
+                      className="goal-topup"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setGoalDetail({
+                          id: goal.id,
+                          name: goal.name,
+                          targetAmount: goal.targetAmount,
+                          color: goal.color || "#0f172a",
+                          targetDate: goal.targetDate || null,
+                          notify: goal.notify === true,
+                          total: goal.currentAmount,
+                        });
+                        setGoalTransfer({ goalId: goal.id, type: "income" });
+                        setGoalTransferAmount("");
+                        setGoalTransferMessage("");
+                      }}
+                    >
+                      Пополнить
+                    </button>
                   </div>
                 ))}
-                <div className="overview-tile compact add placeholder">
+                <div
+                  className="overview-tile compact add placeholder"
+                  onClick={() => {
+                    if (goalEditor?.mode === "create") {
+                      setGoalEditor(null);
+                      return;
+                    }
+                    setGoalEditor({ mode: "create" });
+                    setGoalDetail(null);
+                  }}
+                >
                   <div className="overview-icon">＋</div>
                   <div className="overview-name">Добавить</div>
                 </div>

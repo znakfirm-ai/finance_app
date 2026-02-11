@@ -614,6 +614,92 @@
   color: #f97316;
 }
 
+.overview-tile.goal-card {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.overview-tile.goal-card .overview-icon {
+  background: #e0f2fe;
+  color: #0ea5e9;
+}
+
+.goal-progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.goal-progress-fill {
+  height: 100%;
+  background: #0f172a;
+  border-radius: 999px;
+}
+
+.goal-amount {
+  font-size: 10px;
+  color: #475569;
+}
+
+.goal-deadline {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.goal-topup {
+  border: none;
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.goal-detail-card {
+  border-radius: 18px;
+  padding: 16px;
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-detail-name {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.goal-detail-amount {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.goal-detail-date {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.goal-detail-card .goal-progress {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.goal-detail-card .goal-progress-fill {
+  background: #f8fafc;
+}
+
+.goal-transfer {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .overview-tile.debt.positive {
   border-color: #16a34a;
   color: #166534;

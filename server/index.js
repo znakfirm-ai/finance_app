@@ -262,6 +262,53 @@ async function initDb() {
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS accounts_owner_id_idx ON accounts(owner_id);"
   );
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS goals (
+      id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      name text NOT NULL,
+      target_amount numeric(12,2) NOT NULL DEFAULT 0,
+      color text NOT NULL DEFAULT '${DEFAULT_ACCOUNT_COLOR}',
+      target_date date,
+      notify boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS target_amount numeric(12,2) NOT NULL DEFAULT 0;"
+  );
+  await dbPool.query(
+    `ALTER TABLE goals ADD COLUMN IF NOT EXISTS color text NOT NULL DEFAULT '${DEFAULT_ACCOUNT_COLOR}';`
+  );
+  await dbPool.query("ALTER TABLE goals ADD COLUMN IF NOT EXISTS target_date date;");
+  await dbPool.query(
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify boolean NOT NULL DEFAULT false;"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS goals_owner_id_idx ON goals(owner_id);"
+  );
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS goal_transactions (
+      id text PRIMARY KEY,
+      goal_id text NOT NULL,
+      owner_id text NOT NULL,
+      type text NOT NULL,
+      amount numeric(12,2) NOT NULL,
+      label text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "ALTER TABLE goal_transactions ADD COLUMN IF NOT EXISTS label text;"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS goal_transactions_owner_id_idx ON goal_transactions(owner_id);"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS goal_transactions_goal_id_idx ON goal_transactions(goal_id);"
+  );
 }
 
 async function saveOperation(operation) {
@@ -987,6 +1034,91 @@ async function getAccountsForOwner(ownerId) {
         ? Number(row.opening_balance)
         : 0,
     includeInBalance: row.include_in_balance !== false,
+  }));
+}
+
+async function getGoalsForOwner(ownerId) {
+  if (!ownerId || !dbPool) {
+    return [];
+  }
+  const { rows } = await dbPool.query(
+    `
+    SELECT g.id,
+           g.name,
+           g.target_amount,
+           g.color,
+           g.target_date,
+           g.notify,
+           g.created_at,
+           COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END), 0) AS total
+    FROM goals g
+    LEFT JOIN goal_transactions t
+      ON t.goal_id = g.id AND t.owner_id = g.owner_id
+    WHERE g.owner_id = $1
+    GROUP BY g.id
+    ORDER BY g.created_at ASC
+    `,
+    [ownerId]
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    targetAmount:
+      row.target_amount !== null && row.target_amount !== undefined
+        ? Number(row.target_amount)
+        : 0,
+    color: row.color || DEFAULT_ACCOUNT_COLOR,
+    targetDate: row.target_date ? new Date(row.target_date).toISOString() : null,
+    notify: row.notify === true,
+    total: row.total !== null && row.total !== undefined ? Number(row.total) : 0,
+  }));
+}
+
+async function listGoalTransactions({
+  ownerId,
+  goalId,
+  limit = 100,
+  search = null,
+  before = null,
+  from = null,
+  to = null,
+} = {}) {
+  if (!ownerId || !goalId) return [];
+  if (!dbPool) return [];
+  let query = `
+    SELECT id, type, amount, label, created_at
+    FROM goal_transactions
+    WHERE owner_id = $1 AND goal_id = $2
+  `;
+  const params = [ownerId, goalId];
+  if (search) {
+    const like = `%${String(search).toLowerCase()}%`;
+    params.push(like);
+    const idx = params.length;
+    query += ` AND (LOWER(COALESCE(label, type, '')) LIKE $${idx} OR CAST(amount AS text) LIKE $${idx})`;
+  }
+  if (from) {
+    params.push(from);
+    query += ` AND created_at >= $${params.length}`;
+  }
+  if (to) {
+    params.push(to);
+    query += ` AND created_at <= $${params.length}`;
+  }
+  if (before) {
+    params.push(before);
+    query += ` AND created_at < $${params.length}`;
+  }
+  params.push(limit);
+  query += ` ORDER BY created_at DESC LIMIT $${params.length}`;
+  const { rows } = await dbPool.query(query, params);
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    amount: Number(row.amount),
+    label: row.label || (row.type === "income" ? "Пополнение" : "Изъятие"),
+    createdAt: row.created_at,
+    labelEmoji: row.type === "income" ? "🎯" : "↘️",
   }));
 }
 
@@ -3088,6 +3220,216 @@ app.delete("/api/accounts/:id", async (req, res) => {
   } catch (err) {
     console.error("Delete account failed:", err?.message || err);
     res.status(500).json({ error: "Failed to delete account" });
+  }
+});
+
+app.get("/api/goals", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const goals = await getGoalsForOwner(owner.ownerId);
+    res.json(goals);
+  } catch (err) {
+    console.error("Load goals failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load goals" });
+  }
+});
+
+app.post("/api/goals", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const name = String(req.body?.name || "").trim();
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" });
+    }
+    const targetRaw = Number(req.body?.targetAmount || 0);
+    const targetAmount = Number.isFinite(targetRaw) ? targetRaw : 0;
+    const color = String(req.body?.color || DEFAULT_ACCOUNT_COLOR).trim();
+    const targetDateRaw = String(req.body?.targetDate || "").trim();
+    const targetDate = targetDateRaw ? new Date(targetDateRaw) : null;
+    const notify = req.body?.notify === true || req.body?.notify === "true";
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    await dbPool.query(
+      `INSERT INTO goals (id, owner_id, name, target_amount, color, target_date, notify)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        id,
+        owner.ownerId,
+        name,
+        targetAmount,
+        color,
+        targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
+        notify,
+      ]
+    );
+    res.json({
+      id,
+      name,
+      targetAmount,
+      color,
+      targetDate: targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
+      notify,
+      total: 0,
+    });
+  } catch (err) {
+    console.error("Create goal failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create goal" });
+  }
+});
+
+app.put("/api/goals/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const name = String(req.body?.name || "").trim();
+    if (!id || !name) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const targetRaw = Number(req.body?.targetAmount || 0);
+    const targetAmount = Number.isFinite(targetRaw) ? targetRaw : 0;
+    const color = String(req.body?.color || DEFAULT_ACCOUNT_COLOR).trim();
+    const targetDateRaw = String(req.body?.targetDate || "").trim();
+    const targetDate = targetDateRaw ? new Date(targetDateRaw) : null;
+    const notify = req.body?.notify === true || req.body?.notify === "true";
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const result = await dbPool.query(
+      `UPDATE goals
+       SET name = $1, target_amount = $2, color = $3, target_date = $4, notify = $5
+       WHERE id = $6 AND owner_id = $7`,
+      [
+        name,
+        targetAmount,
+        color,
+        targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
+        notify,
+        id,
+        owner.ownerId,
+      ]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Goal not found" });
+    }
+    res.json({
+      id,
+      name,
+      targetAmount,
+      color,
+      targetDate: targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
+      notify,
+    });
+  } catch (err) {
+    console.error("Update goal failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update goal" });
+  }
+});
+
+app.get("/api/goals/:id/transactions", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const limit = Number(req.query?.limit || 100);
+    const search = req.query?.q ? String(req.query.q) : null;
+    const before = req.query?.before ? String(req.query.before) : null;
+    const from = req.query?.from ? String(req.query.from) : null;
+    const to = req.query?.to ? String(req.query.to) : null;
+    const items = await listGoalTransactions({
+      ownerId: owner.ownerId,
+      goalId: id,
+      limit: Number.isFinite(limit) ? limit : 100,
+      search,
+      before,
+      from,
+      to,
+    });
+    res.json(items);
+  } catch (err) {
+    console.error("Load goal transactions failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load goal transactions" });
+  }
+});
+
+app.post("/api/goals/:id/transactions", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const goalId = String(req.params.id || "");
+    if (!goalId) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const amountRaw = Number(req.body?.amount || 0);
+    const amount = Number.isFinite(amountRaw) ? Math.abs(amountRaw) : 0;
+    if (!amount) {
+      return res.status(400).json({ error: "Amount is required" });
+    }
+    let type = String(req.body?.type || "income").toLowerCase();
+    if (type === "deposit") type = "income";
+    if (type === "withdraw") type = "expense";
+    if (type !== "income" && type !== "expense") {
+      type = "income";
+    }
+    const label = type === "income" ? "Пополнение" : "Изъятие";
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const goalCheck = await dbPool.query(
+      "SELECT id FROM goals WHERE id = $1 AND owner_id = $2",
+      [goalId, owner.ownerId]
+    );
+    if (!goalCheck.rows.length) {
+      return res.status(404).json({ error: "Goal not found" });
+    }
+    const id = `gtrx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    await dbPool.query(
+      `INSERT INTO goal_transactions (id, goal_id, owner_id, type, amount, label)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, goalId, owner.ownerId, type, amount, label]
+    );
+    res.json({
+      id,
+      goalId,
+      type,
+      amount,
+      label,
+    });
+  } catch (err) {
+    console.error("Create goal transaction failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create goal transaction" });
   }
 });
 
