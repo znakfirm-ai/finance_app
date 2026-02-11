@@ -365,10 +365,17 @@ function App() {
   const [goalDate, setGoalDate] = useState("");
   const [goalColor, setGoalColor] = useState("#0f172a");
   const [goalNotify, setGoalNotify] = useState(false);
+  const [goalNotifyOpen, setGoalNotifyOpen] = useState(false);
+  const [goalNotifyFrequency, setGoalNotifyFrequency] = useState("monthly");
+  const [goalNotifyStartDate, setGoalNotifyStartDate] = useState("");
+  const [goalErrors, setGoalErrors] = useState({});
   const [goalSaveMessage, setGoalSaveMessage] = useState("");
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
+  const [goalTransferAccount, setGoalTransferAccount] = useState("");
   const [goalTransferMessage, setGoalTransferMessage] = useState("");
+  const [goalTxEditor, setGoalTxEditor] = useState(null);
+  const [goalTxError, setGoalTxError] = useState("");
   const [editingIncomeSourceName, setEditingIncomeSourceName] = useState("");
   const [incomeSourceSaveMessage, setIncomeSourceSaveMessage] = useState("");
   const [operationEditor, setOperationEditor] = useState(null);
@@ -720,12 +727,16 @@ function App() {
   useEffect(() => {
     if (!goalEditor) return;
     setGoalSaveMessage("");
+    setGoalErrors({});
+    setGoalNotifyOpen(false);
     if (goalEditor.mode === "create") {
       setGoalName("");
       setGoalTarget("");
       setGoalDate("");
       setGoalColor("#0f172a");
       setGoalNotify(false);
+      setGoalNotifyFrequency("monthly");
+      setGoalNotifyStartDate("");
       return;
     }
     setGoalName(goalEditor.name || "");
@@ -737,6 +748,10 @@ function App() {
     setGoalDate(goalEditor.targetDate ? formatDateInput(goalEditor.targetDate) : "");
     setGoalColor(goalEditor.color || "#0f172a");
     setGoalNotify(goalEditor.notify === true);
+    setGoalNotifyFrequency(goalEditor.notifyFrequency || "monthly");
+    setGoalNotifyStartDate(
+      goalEditor.notifyStartDate ? formatDateInput(goalEditor.notifyStartDate) : ""
+    );
   }, [goalEditor?.id, goalEditor?.mode, goalEditor?.name]);
 
   useEffect(() => {
@@ -750,6 +765,9 @@ function App() {
       color: latest.color,
       targetDate: latest.targetDate,
       notify: latest.notify === true,
+      notifyFrequency: latest.notifyFrequency || null,
+      notifyStartDate: latest.notifyStartDate || null,
+      createdAt: latest.createdAt || null,
       total: latest.total,
     }));
   }, [goals, goalDetail?.id]);
@@ -1197,15 +1215,31 @@ function App() {
 
   async function createGoal() {
     const name = goalName.trim();
-    if (!name) return;
+    const targetAmountValue = parseNumberInput(goalTarget);
+    const nextErrors = {};
+    if (!name) nextErrors.name = true;
+    if (targetAmountValue === null || targetAmountValue === undefined) {
+      nextErrors.target = true;
+    }
+    if (goalNotify) {
+      if (!goalNotifyFrequency) nextErrors.notifyFrequency = true;
+      if (!goalNotifyStartDate) nextErrors.notifyStartDate = true;
+    }
+    setGoalErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      setGoalSaveMessage("Заполните обязательные поля");
+      return;
+    }
     try {
-      const targetAmount = parseNumberInput(goalTarget) ?? 0;
+      const targetAmount = targetAmountValue ?? 0;
       const payload = {
         name,
         targetAmount,
         targetDate: goalDate || null,
         color: goalColor || "#0f172a",
         notify: goalNotify === true,
+        notifyFrequency: goalNotify ? goalNotifyFrequency : null,
+        notifyStartDate: goalNotify ? goalNotifyStartDate || null : null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -1216,7 +1250,7 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
-      setGoals((prev) => [...prev, data]);
+      await loadGoals();
       setGoalEditor({ ...data, mode: "edit" });
       setGoalDetail({ ...data });
       setGoalSaveMessage("Цель создана");
@@ -1228,15 +1262,31 @@ function App() {
 
   async function updateGoal(id) {
     const name = goalName.trim();
-    if (!name) return;
+    const targetAmountValue = parseNumberInput(goalTarget);
+    const nextErrors = {};
+    if (!name) nextErrors.name = true;
+    if (targetAmountValue === null || targetAmountValue === undefined) {
+      nextErrors.target = true;
+    }
+    if (goalNotify) {
+      if (!goalNotifyFrequency) nextErrors.notifyFrequency = true;
+      if (!goalNotifyStartDate) nextErrors.notifyStartDate = true;
+    }
+    setGoalErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      setGoalSaveMessage("Заполните обязательные поля");
+      return;
+    }
     try {
-      const targetAmount = parseNumberInput(goalTarget) ?? 0;
+      const targetAmount = targetAmountValue ?? 0;
       const payload = {
         name,
         targetAmount,
         targetDate: goalDate || null,
         color: goalColor || "#0f172a",
         notify: goalNotify === true,
+        notifyFrequency: goalNotify ? goalNotifyFrequency : null,
+        notifyStartDate: goalNotify ? goalNotifyStartDate || null : null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -1267,11 +1317,20 @@ function App() {
 
   async function addGoalTransaction(goalId, type) {
     const amount = parseNumberInput(goalTransferAmount);
-    if (!goalId || !amount) return;
+    if (!goalId || !amount) {
+      setGoalTransferMessage("Введите сумму");
+      return;
+    }
+    const accountValue = accounts.length ? goalTransferAccount : "";
+    if (accounts.length && !accountValue) {
+      setGoalTransferMessage("Выберите счет");
+      return;
+    }
     try {
       const payload = {
         amount,
         type,
+        account: accountValue || null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -1288,7 +1347,71 @@ function App() {
       await loadGoals();
       await loadHistory(true);
     } catch (e) {
-      setError(e.message || "Ошибка операции по цели");
+      setGoalTransferMessage(e.message || "Ошибка операции по цели");
+    }
+  }
+
+  async function updateGoalTransactionEntry(entry) {
+    if (!entry?.goalId || !entry?.id) return;
+    const amount = parseNumberInput(entry.amount);
+    if (!amount) {
+      setGoalTxError("Введите сумму");
+      return;
+    }
+    if (accounts.length && !entry.account) {
+      setGoalTxError("Выберите счет");
+      return;
+    }
+    setGoalTxError("");
+    try {
+      const payload = {
+        amount,
+        type: entry.type,
+        date: entry.date,
+        account: entry.account || null,
+      };
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(
+        apiUrl(`/api/goals/${entry.goalId}/transactions/${entry.id}`),
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setGoalTxEditor(null);
+      await loadGoals();
+      await loadHistory(true);
+    } catch (e) {
+      setGoalTxError(e.message || "Ошибка обновления");
+    }
+  }
+
+  async function deleteGoalTransactionEntry(entry) {
+    if (!entry?.goalId || !entry?.id) return;
+    if (!confirm("Удалить операцию?")) return;
+    try {
+      const payload = {};
+      if (webUserId) payload.webUserId = webUserId;
+      if (initData) payload.initData = initData;
+      const res = await fetch(
+        apiUrl(withWebQuery(`/api/goals/${entry.goalId}/transactions/${entry.id}`)),
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setGoalTxEditor(null);
+      await loadGoals();
+      await loadHistory(true);
+    } catch (e) {
+      setGoalTxError(e.message || "Ошибка удаления");
     }
   }
 
@@ -1673,11 +1796,27 @@ function App() {
     const currentAmount = Number(goal.total || 0);
     const progress =
       targetAmount > 0 ? Math.min(1, Math.max(0, currentAmount / targetAmount)) : 0;
+    const createdAt = goal.createdAt ? new Date(goal.createdAt) : null;
+    const targetDate = goal.targetDate ? new Date(goal.targetDate) : null;
+    let timeStatus = "";
+    if (targetDate && !Number.isNaN(targetDate.getTime())) {
+      const now = new Date();
+      if (now > targetDate) {
+        timeStatus = "overdue";
+      } else if (createdAt && !Number.isNaN(createdAt.getTime())) {
+        const totalMs = targetDate.getTime() - createdAt.getTime();
+        const remainingMs = targetDate.getTime() - now.getTime();
+        if (totalMs > 0 && remainingMs / totalMs <= 0.2) {
+          timeStatus = "warn";
+        }
+      }
+    }
     return {
       ...goal,
       targetAmount,
       currentAmount,
       progress,
+      timeStatus,
     };
   });
   const debtPlaceholders = [
@@ -1784,6 +1923,26 @@ function App() {
   const formatSignedMoney = (value, type, symbolOverride) => {
     const sign = type === "income" ? "+" : "-";
     return `${sign}${formatMoney(Math.abs(value || 0), symbolOverride)}`;
+  };
+
+  const getOperationFlowLine = (op) => {
+    if (!op) return "";
+    const account = op.account || "";
+    const category = op.category || "";
+    const incomeSource = op.incomeSource || (op.type === "income" ? category : "");
+    if (op.type === "income") {
+      return [incomeSource, account].filter(Boolean).join(" → ");
+    }
+    return [account, category].filter(Boolean).join(" → ");
+  };
+
+  const getGoalFlowLine = (op) => {
+    if (!op) return "";
+    const account = op.account || "";
+    if (op.type === "income") {
+      return [account, "Цель"].filter(Boolean).join(" → ");
+    }
+    return ["Цель", account].filter(Boolean).join(" → ");
   };
 
   const quickActive = {
@@ -2367,27 +2526,40 @@ function App() {
           <div className="account-edit-panel">
             <label className="label">Название цели</label>
             <input
-              className="input"
+              className={`input ${goalErrors.name ? "invalid" : ""}`}
               value={goalName}
               onChange={(e) => setGoalName(e.target.value)}
               placeholder="Например: Отпуск"
             />
             <label className="label">Сумма цели</label>
             <input
-              className="input"
+              className={`input ${goalErrors.target ? "invalid" : ""}`}
               type="number"
               step="0.01"
               value={goalTarget}
               onChange={(e) => setGoalTarget(e.target.value)}
               placeholder="0"
             />
-            <label className="label">Срок</label>
-            <input
-              className="input"
-              type="date"
-              value={goalDate}
-              onChange={(e) => setGoalDate(e.target.value)}
-            />
+            <div className="row">
+              <label className="label">Срок</label>
+              <button
+                className="btn ghost"
+                onClick={() =>
+                  setGoalDate(
+                    goalDate ? "" : formatDateInput(new Date())
+                  )
+                }
+              >
+                {goalDate ? "Сбросить" : "Задать"}
+              </button>
+            </div>
+            {goalDate && (
+              <DateSlotPicker
+                value={goalDate}
+                ariaLabel="Срок цели"
+                onChange={(value) => setGoalDate(value)}
+              />
+            )}
             <div className="row">
               <label className="label">Цвет</label>
               <div className="color-row">
@@ -2401,14 +2573,51 @@ function App() {
                 ))}
               </div>
             </div>
-            <label className="toggle large">
-              <input
-                type="checkbox"
-                checked={goalNotify}
-                onChange={(e) => setGoalNotify(e.target.checked)}
-              />
+            <button
+              className="btn ghost"
+              onClick={() =>
+                setGoalNotifyOpen((prev) => {
+                  const next = !prev;
+                  if (next && !goalNotifyStartDate) {
+                    setGoalNotifyStartDate(formatDateInput(new Date()));
+                  }
+                  return next;
+                })
+              }
+            >
               Уведомления
-            </label>
+            </button>
+            {goalNotifyOpen && (
+              <div className="goal-notify">
+                <label className="toggle large">
+                  <input
+                    type="checkbox"
+                    checked={goalNotify}
+                    onChange={(e) => setGoalNotify(e.target.checked)}
+                  />
+                  Включить уведомления
+                </label>
+                <label className="label">Напоминать</label>
+                <select
+                  className={`select ${goalErrors.notifyFrequency ? "invalid" : ""}`}
+                  value={goalNotifyFrequency}
+                  onChange={(e) => setGoalNotifyFrequency(e.target.value)}
+                >
+                  <option value="daily">Каждый день</option>
+                  <option value="weekly">Каждую неделю</option>
+                  <option value="monthly">Каждый месяц</option>
+                </select>
+                <label className="label">Начать с даты</label>
+                <DateSlotPicker
+                  value={goalNotifyStartDate || formatDateInput(new Date())}
+                  ariaLabel="Дата начала уведомлений"
+                  onChange={(value) => setGoalNotifyStartDate(value)}
+                />
+                {goalErrors.notifyStartDate && (
+                  <div className="error">Укажите дату</div>
+                )}
+              </div>
+            )}
             <div className="row">
               <button
                 className="btn"
@@ -2430,6 +2639,87 @@ function App() {
         return <section className="overview-shell">{goalEditorView}</section>;
       }
 
+      if (goalTxEditor) {
+        return (
+          <section className="overview-shell">
+            <div className="overview-manage-header">
+              <div className="overview-manage-title">Операция цели</div>
+              <button className="btn ghost" onClick={() => setGoalTxEditor(null)}>
+                Закрыть
+              </button>
+            </div>
+            <label className="label">Дата операции</label>
+            <DateSlotPicker
+              value={goalTxEditor.date || formatDateInput(new Date())}
+              ariaLabel="Дата операции"
+              onChange={(value) =>
+                setGoalTxEditor((prev) => ({ ...prev, date: value }))
+              }
+            />
+            <label className="label">Тип</label>
+            <select
+              className="select"
+              value={goalTxEditor.type}
+              onChange={(e) =>
+                setGoalTxEditor((prev) => ({ ...prev, type: e.target.value }))
+              }
+            >
+              <option value="income">Пополнение</option>
+              <option value="expense">Изъятие</option>
+            </select>
+            {accounts.length > 0 && (
+              <>
+                <label className="label">
+                  {goalTxEditor.type === "income" ? "Со счета" : "На счет"}
+                </label>
+                <select
+                  className={`select ${goalTxError ? "invalid" : ""}`}
+                  value={goalTxEditor.account || ""}
+                  onChange={(e) =>
+                    setGoalTxEditor((prev) => ({ ...prev, account: e.target.value }))
+                  }
+                >
+                  <option value="">Выберите счет</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.name}>
+                      {acc.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            <label className="label">Сумма</label>
+            <input
+              className={`input ${goalTxError ? "invalid" : ""}`}
+              type="number"
+              step="0.01"
+              value={goalTxEditor.amount}
+              onChange={(e) =>
+                setGoalTxEditor((prev) => ({ ...prev, amount: e.target.value }))
+              }
+            />
+            {goalTxError && <div className="error">{goalTxError}</div>}
+            <div className="row">
+              <button
+                className="btn"
+                onClick={() => updateGoalTransactionEntry(goalTxEditor)}
+              >
+                Сохранить
+              </button>
+              <button className="btn ghost" onClick={() => setGoalTxEditor(null)}>
+                Отмена
+              </button>
+            </div>
+            <button
+              className="btn danger"
+              onClick={() => deleteGoalTransactionEntry(goalTxEditor)}
+            >
+              Удалить операцию
+            </button>
+          </section>
+        );
+      }
+
       if (goalDetail) {
         const progress =
           goalDetail.targetAmount > 0
@@ -2445,6 +2735,7 @@ function App() {
                   setGoalDetail(null);
                   setGoalTransfer(null);
                   setGoalTransferAmount("");
+                  setGoalTransferAccount("");
                 }}
               >
                 Закрыть
@@ -2500,6 +2791,7 @@ function App() {
                 onClick={() => {
                   setGoalTransfer({ goalId: goalDetail.id, type: "income" });
                   setGoalTransferAmount("");
+                  setGoalTransferAccount(accounts[0]?.name || "");
                   setGoalTransferMessage("");
                 }}
               >
@@ -2510,6 +2802,7 @@ function App() {
                 onClick={() => {
                   setGoalTransfer({ goalId: goalDetail.id, type: "expense" });
                   setGoalTransferAmount("");
+                  setGoalTransferAccount(accounts[0]?.name || "");
                   setGoalTransferMessage("");
                 }}
               >
@@ -2529,6 +2822,25 @@ function App() {
                   value={goalTransferAmount}
                   onChange={(e) => setGoalTransferAmount(e.target.value)}
                 />
+                {accounts.length > 0 && (
+                  <>
+                    <label className="label">
+                      {goalTransfer.type === "income" ? "Со счета" : "На счет"}
+                    </label>
+                    <select
+                      className="select"
+                      value={goalTransferAccount}
+                      onChange={(e) => setGoalTransferAccount(e.target.value)}
+                    >
+                      <option value="">Выберите счет</option>
+                      {accounts.map((acc) => (
+                        <option key={acc.id} value={acc.name}>
+                          {acc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <button
                   className="btn"
                   onClick={() => addGoalTransaction(goalDetail.id, goalTransfer.type)}
@@ -2536,7 +2848,15 @@ function App() {
                   Сохранить
                 </button>
                 {goalTransferMessage && (
-                  <div className="status success">{goalTransferMessage}</div>
+                  <div
+                    className={
+                      /недостаточно|ошиб|выберите|введите/i.test(goalTransferMessage)
+                        ? "error"
+                        : "status success"
+                    }
+                  >
+                    {goalTransferMessage}
+                  </div>
                 )}
               </div>
             )}
@@ -2552,19 +2872,33 @@ function App() {
                     </div>
                     <div className="history-rows">
                       {group.items.map((op) => (
-                        <div key={op.id} className="history-row">
+                        <button
+                          key={op.id}
+                          className="history-row"
+                          onClick={() => {
+                            setGoalTxError("");
+                            setGoalTxEditor({
+                              id: op.id,
+                              goalId: goalDetail.id,
+                              type: op.type,
+                              amount: op.amount,
+                              account: op.account || accounts[0]?.name || "",
+                              date: formatDateInput(
+                                op.createdAt || op.date || op.created_at || ""
+                              ),
+                            });
+                          }}
+                        >
                           <div className="history-row-main">
-                            <span className="history-emoji">
-                              {op.labelEmoji || "🎯"}
-                            </span>
                             <span className="history-label">{op.label}</span>
+                            <span className="history-meta">{getGoalFlowLine(op)}</span>
                           </div>
                           <span
                             className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
                           >
                             {formatSignedMoney(op.amount, op.type, settings.currencySymbol)}
                           </span>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -2582,6 +2916,8 @@ function App() {
                   targetDate: goalDetail.targetDate || "",
                   color: goalDetail.color || "#0f172a",
                   notify: goalDetail.notify === true,
+                  notifyFrequency: goalDetail.notifyFrequency || null,
+                  notifyStartDate: goalDetail.notifyStartDate || null,
                   mode: "edit",
                 })
               }
@@ -2673,10 +3009,10 @@ function App() {
                           }
                         >
                           <div className="history-row-main">
-                            <span className="history-emoji">
-                              {op.labelEmoji || "🧾"}
-                            </span>
                             <span className="history-label">{op.label || op.text}</span>
+                            <span className="history-meta">
+                              {getOperationFlowLine(op)}
+                            </span>
                           </div>
                           <span
                             className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
@@ -2794,10 +3130,10 @@ function App() {
                           }
                         >
                           <div className="history-row-main">
-                            <span className="history-emoji">
-                              {op.labelEmoji || "🧾"}
-                            </span>
                             <span className="history-label">{op.label || op.text}</span>
+                            <span className="history-meta">
+                              {getOperationFlowLine(op)}
+                            </span>
                           </div>
                           <span
                             className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
@@ -2899,10 +3235,10 @@ function App() {
                           }
                         >
                           <div className="history-row-main">
-                            <span className="history-emoji">
-                              {op.labelEmoji || "🧾"}
-                            </span>
                             <span className="history-label">{op.label || op.text}</span>
+                            <span className="history-meta">
+                              {getOperationFlowLine(op)}
+                            </span>
                           </div>
                           <div
                             className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
@@ -3199,7 +3535,7 @@ function App() {
                 {goalTiles.map((goal) => (
                   <div
                     key={goal.id}
-                    className="overview-tile compact goal-card"
+                    className={`overview-tile compact goal-card ${goal.timeStatus}`}
                     onClick={() => {
                       setAccountDetail(null);
                       setIncomeSourceDetail(null);
@@ -3211,7 +3547,10 @@ function App() {
                         color: goal.color || "#0f172a",
                         targetDate: goal.targetDate || null,
                         notify: goal.notify === true,
+                        notifyFrequency: goal.notifyFrequency || null,
+                        notifyStartDate: goal.notifyStartDate || null,
                         total: goal.currentAmount,
+                        createdAt: goal.createdAt || null,
                       });
                     }}
                   >
@@ -3229,33 +3568,14 @@ function App() {
                       />
                     </div>
                     <div className="goal-amount">
-                      {formatMoney(goal.currentAmount)} / {formatMoney(goal.targetAmount)}
+                      {formatMoney(goal.currentAmount)} / {formatMoney(goal.targetAmount)} (
+                      {Math.round(goal.progress * 100)}%)
                     </div>
                     {goal.targetDate && (
                       <div className="goal-deadline">
                         до {formatDisplayDate(goal.targetDate)}
                       </div>
                     )}
-                    <button
-                      className="goal-topup"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setGoalDetail({
-                          id: goal.id,
-                          name: goal.name,
-                          targetAmount: goal.targetAmount,
-                          color: goal.color || "#0f172a",
-                          targetDate: goal.targetDate || null,
-                          notify: goal.notify === true,
-                          total: goal.currentAmount,
-                        });
-                        setGoalTransfer({ goalId: goal.id, type: "income" });
-                        setGoalTransferAmount("");
-                        setGoalTransferMessage("");
-                      }}
-                    >
-                      Пополнить
-                    </button>
                   </div>
                 ))}
                 <div

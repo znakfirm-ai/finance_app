@@ -590,6 +590,7 @@
   background: #eef2ff;
   border-style: dashed;
   color: #4f46e5;
+  justify-content: center;
 }
 
 .overview-tile.placeholder {
@@ -617,6 +618,16 @@
 .overview-tile.goal-card {
   background: #f1f5f9;
   border-color: #e2e8f0;
+}
+
+.overview-tile.goal-card.warn {
+  border-color: #f59e0b;
+  box-shadow: 0 8px 18px rgba(245, 158, 11, 0.15);
+}
+
+.overview-tile.goal-card.overdue {
+  border-color: #ef4444;
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.16);
 }
 
 .overview-tile.goal-card .overview-icon {
@@ -1175,7 +1186,7 @@
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   text-align: left;
@@ -1184,18 +1195,35 @@
 
 .history-row-main {
   display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.history-emoji {
-  font-size: 18px;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .history-label {
   font-size: 13px;
   font-weight: 600;
   color: #111827;
+}
+
+.history-meta {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.input.invalid,
+.select.invalid {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12);
+}
+
+.goal-notify {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .history-amount {

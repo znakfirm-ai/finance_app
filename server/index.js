@@ -272,6 +272,9 @@ async function initDb() {
       color text NOT NULL DEFAULT '${DEFAULT_ACCOUNT_COLOR}',
       target_date date,
       notify boolean NOT NULL DEFAULT false,
+      notify_frequency text,
+      notify_start_date date,
+      notify_last_sent timestamptz,
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
@@ -286,6 +289,15 @@ async function initDb() {
     "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify boolean NOT NULL DEFAULT false;"
   );
   await dbPool.query(
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify_frequency text;"
+  );
+  await dbPool.query(
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify_start_date date;"
+  );
+  await dbPool.query(
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify_last_sent timestamptz;"
+  );
+  await dbPool.query(
     "CREATE INDEX IF NOT EXISTS goals_owner_id_idx ON goals(owner_id);"
   );
 
@@ -296,10 +308,14 @@ async function initDb() {
       owner_id text NOT NULL,
       type text NOT NULL,
       amount numeric(12,2) NOT NULL,
+      account text,
       label text,
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await dbPool.query(
+    "ALTER TABLE goal_transactions ADD COLUMN IF NOT EXISTS account text;"
+  );
   await dbPool.query(
     "ALTER TABLE goal_transactions ADD COLUMN IF NOT EXISTS label text;"
   );
@@ -779,6 +795,82 @@ function verifyTelegramInitData(initData) {
   return { ok: true, userId: String(user.id), user };
 }
 
+async function sendGoalNotification(goal, total) {
+  if (!TELEGRAM_API || !goal?.owner_id) return;
+  if (String(goal.owner_id || "").startsWith("web_")) return;
+  const percent =
+    goal.target_amount && Number(goal.target_amount) > 0
+      ? Math.round((Number(total) / Number(goal.target_amount)) * 100)
+      : 0;
+  const text =
+    `Напоминание по цели: ${goal.name}\n` +
+    `Прогресс: ${formatAmount(total)} из ${formatAmount(goal.target_amount)} (${percent}%)`;
+  await telegramApi("sendMessage", {
+    chat_id: goal.owner_id,
+    text,
+  });
+}
+
+function getPeriodMs(freq) {
+  if (freq === "daily") return 24 * 60 * 60 * 1000;
+  if (freq === "weekly") return 7 * 24 * 60 * 60 * 1000;
+  if (freq === "monthly") return 30 * 24 * 60 * 60 * 1000;
+  return null;
+}
+
+async function runGoalNotificationCheck() {
+  if (!dbPool || !TELEGRAM_API) return;
+  const { rows } = await dbPool.query(`
+    SELECT g.id,
+           g.owner_id,
+           g.name,
+           g.target_amount,
+           g.notify,
+           g.notify_frequency,
+           g.notify_start_date,
+           g.notify_last_sent,
+           COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END), 0) AS total
+    FROM goals g
+    LEFT JOIN goal_transactions t
+      ON t.goal_id = g.id AND t.owner_id = g.owner_id
+    WHERE g.notify = true AND g.notify_frequency IS NOT NULL AND g.notify_start_date IS NOT NULL
+    GROUP BY g.id
+  `);
+  const now = new Date();
+  for (const row of rows) {
+    const startDate = row.notify_start_date ? new Date(row.notify_start_date) : null;
+    if (!startDate || Number.isNaN(startDate.getTime())) continue;
+    if (now < startDate) continue;
+    const freq = row.notify_frequency;
+    const periodMs = getPeriodMs(freq);
+    if (!periodMs) continue;
+    const lastSent = row.notify_last_sent ? new Date(row.notify_last_sent) : null;
+    if (lastSent && now.getTime() - lastSent.getTime() < periodMs) continue;
+    try {
+      await sendGoalNotification(row, Number(row.total || 0));
+      await dbPool.query(
+        "UPDATE goals SET notify_last_sent = $1 WHERE id = $2 AND owner_id = $3",
+        [now.toISOString(), row.id, row.owner_id]
+      );
+    } catch (err) {
+      console.error("Goal notify failed:", err?.message || err);
+    }
+  }
+}
+
+function startGoalNotificationLoop() {
+  if (!dbPool || !TELEGRAM_API) return;
+  const intervalMs = 15 * 60 * 1000;
+  setInterval(() => {
+    runGoalNotificationCheck().catch((err) =>
+      console.error("Goal notification check failed:", err?.message || err)
+    );
+  }, intervalMs);
+  runGoalNotificationCheck().catch((err) =>
+    console.error("Goal notification check failed:", err?.message || err)
+  );
+}
+
 function getOwnerFromRequest(req) {
   const initData =
     req.header("x-telegram-init-data") ||
@@ -1049,6 +1141,9 @@ async function getGoalsForOwner(ownerId) {
            g.color,
            g.target_date,
            g.notify,
+           g.notify_frequency,
+           g.notify_start_date,
+           g.notify_last_sent,
            g.created_at,
            COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END), 0) AS total
     FROM goals g
@@ -1070,6 +1165,12 @@ async function getGoalsForOwner(ownerId) {
     color: row.color || DEFAULT_ACCOUNT_COLOR,
     targetDate: row.target_date ? new Date(row.target_date).toISOString() : null,
     notify: row.notify === true,
+    notifyFrequency: row.notify_frequency || null,
+    notifyStartDate: row.notify_start_date
+      ? new Date(row.notify_start_date).toISOString()
+      : null,
+    notifyLastSent: row.notify_last_sent ? row.notify_last_sent.toISOString() : null,
+    createdAt: row.created_at ? row.created_at.toISOString() : null,
     total: row.total !== null && row.total !== undefined ? Number(row.total) : 0,
   }));
 }
@@ -1086,7 +1187,7 @@ async function listGoalTransactions({
   if (!ownerId || !goalId) return [];
   if (!dbPool) return [];
   let query = `
-    SELECT id, type, amount, label, created_at
+    SELECT id, type, amount, label, account, created_at
     FROM goal_transactions
     WHERE owner_id = $1 AND goal_id = $2
   `;
@@ -1095,7 +1196,7 @@ async function listGoalTransactions({
     const like = `%${String(search).toLowerCase()}%`;
     params.push(like);
     const idx = params.length;
-    query += ` AND (LOWER(COALESCE(label, type, '')) LIKE $${idx} OR CAST(amount AS text) LIKE $${idx})`;
+    query += ` AND (LOWER(COALESCE(label, type, account, '')) LIKE $${idx} OR CAST(amount AS text) LIKE $${idx})`;
   }
   if (from) {
     params.push(from);
@@ -1117,9 +1218,24 @@ async function listGoalTransactions({
     type: row.type,
     amount: Number(row.amount),
     label: row.label || (row.type === "income" ? "Пополнение" : "Изъятие"),
+    account: row.account || "",
     createdAt: row.created_at,
     labelEmoji: row.type === "income" ? "🎯" : "↘️",
   }));
+}
+
+async function getGoalTotal(ownerId, goalId, excludeId = null) {
+  if (!dbPool) return 0;
+  const params = [ownerId, goalId];
+  let query =
+    "SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS total FROM goal_transactions WHERE owner_id = $1 AND goal_id = $2";
+  if (excludeId) {
+    params.push(excludeId);
+    query += ` AND id <> $${params.length}`;
+  }
+  const { rows } = await dbPool.query(query, params);
+  const total = rows[0]?.total;
+  return total !== null && total !== undefined ? Number(total) : 0;
 }
 
 async function getTelegramVoiceText(fileId) {
@@ -3259,13 +3375,19 @@ app.post("/api/goals", async (req, res) => {
     const targetDateRaw = String(req.body?.targetDate || "").trim();
     const targetDate = targetDateRaw ? new Date(targetDateRaw) : null;
     const notify = req.body?.notify === true || req.body?.notify === "true";
+    const notifyFrequencyRaw = String(req.body?.notifyFrequency || "").trim().toLowerCase();
+    const notifyFrequency = ["daily", "weekly", "monthly"].includes(notifyFrequencyRaw)
+      ? notifyFrequencyRaw
+      : null;
+    const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
+    const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     await dbPool.query(
-      `INSERT INTO goals (id, owner_id, name, target_amount, color, target_date, notify)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO goals (id, owner_id, name, target_amount, color, target_date, notify, notify_frequency, notify_start_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         id,
         owner.ownerId,
@@ -3274,6 +3396,10 @@ app.post("/api/goals", async (req, res) => {
         color,
         targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
         notify,
+        notifyFrequency,
+        notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
+          ? notifyStartDate.toISOString()
+          : null,
       ]
     );
     res.json({
@@ -3283,6 +3409,12 @@ app.post("/api/goals", async (req, res) => {
       color,
       targetDate: targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
       notify,
+      notifyFrequency,
+      notifyStartDate:
+        notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
+          ? notifyStartDate.toISOString()
+          : null,
+      createdAt: new Date().toISOString(),
       total: 0,
     });
   } catch (err) {
@@ -3311,19 +3443,35 @@ app.put("/api/goals/:id", async (req, res) => {
     const targetDateRaw = String(req.body?.targetDate || "").trim();
     const targetDate = targetDateRaw ? new Date(targetDateRaw) : null;
     const notify = req.body?.notify === true || req.body?.notify === "true";
+    const notifyFrequencyRaw = String(req.body?.notifyFrequency || "").trim().toLowerCase();
+    const notifyFrequency = ["daily", "weekly", "monthly"].includes(notifyFrequencyRaw)
+      ? notifyFrequencyRaw
+      : null;
+    const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
+    const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const result = await dbPool.query(
       `UPDATE goals
-       SET name = $1, target_amount = $2, color = $3, target_date = $4, notify = $5
-       WHERE id = $6 AND owner_id = $7`,
+       SET name = $1,
+           target_amount = $2,
+           color = $3,
+           target_date = $4,
+           notify = $5,
+           notify_frequency = $6,
+           notify_start_date = $7
+       WHERE id = $8 AND owner_id = $9`,
       [
         name,
         targetAmount,
         color,
         targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
         notify,
+        notifyFrequency,
+        notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
+          ? notifyStartDate.toISOString()
+          : null,
         id,
         owner.ownerId,
       ]
@@ -3338,6 +3486,11 @@ app.put("/api/goals/:id", async (req, res) => {
       color,
       targetDate: targetDate && !Number.isNaN(targetDate.getTime()) ? targetDate.toISOString() : null,
       notify,
+      notifyFrequency,
+      notifyStartDate:
+        notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
+          ? notifyStartDate.toISOString()
+          : null,
     });
   } catch (err) {
     console.error("Update goal failed:", err?.message || err);
@@ -3404,6 +3557,9 @@ app.post("/api/goals/:id/transactions", async (req, res) => {
       type = "income";
     }
     const label = type === "income" ? "Пополнение" : "Изъятие";
+    const account = String(req.body?.account || "").trim() || null;
+    const dateRaw = String(req.body?.date || "").trim();
+    const dateValue = dateRaw ? new Date(dateRaw) : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
@@ -3414,11 +3570,28 @@ app.post("/api/goals/:id/transactions", async (req, res) => {
     if (!goalCheck.rows.length) {
       return res.status(404).json({ error: "Goal not found" });
     }
+    if (type === "expense") {
+      const currentTotal = await getGoalTotal(owner.ownerId, goalId);
+      if (amount > currentTotal) {
+        return res.status(400).json({ error: "Недостаточно средств в цели" });
+      }
+    }
     const id = `gtrx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     await dbPool.query(
-      `INSERT INTO goal_transactions (id, goal_id, owner_id, type, amount, label)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [id, goalId, owner.ownerId, type, amount, label]
+      `INSERT INTO goal_transactions (id, goal_id, owner_id, type, amount, label, account, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        id,
+        goalId,
+        owner.ownerId,
+        type,
+        amount,
+        label,
+        account,
+        dateValue && !Number.isNaN(dateValue.getTime())
+          ? dateValue.toISOString()
+          : new Date().toISOString(),
+      ]
     );
     res.json({
       id,
@@ -3426,10 +3599,109 @@ app.post("/api/goals/:id/transactions", async (req, res) => {
       type,
       amount,
       label,
+      account: account || "",
     });
   } catch (err) {
     console.error("Create goal transaction failed:", err?.message || err);
     res.status(500).json({ error: "Failed to create goal transaction" });
+  }
+});
+
+app.put("/api/goals/:id/transactions/:txId", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const goalId = String(req.params.id || "");
+    const txId = String(req.params.txId || "");
+    if (!goalId || !txId) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const amountRaw = Number(req.body?.amount || 0);
+    const amount = Number.isFinite(amountRaw) ? Math.abs(amountRaw) : 0;
+    if (!amount) {
+      return res.status(400).json({ error: "Amount is required" });
+    }
+    let type = String(req.body?.type || "income").toLowerCase();
+    if (type === "deposit") type = "income";
+    if (type === "withdraw") type = "expense";
+    if (type !== "income" && type !== "expense") type = "income";
+    const label = type === "income" ? "Пополнение" : "Изъятие";
+    const account = String(req.body?.account || "").trim() || null;
+    const dateRaw = String(req.body?.date || "").trim();
+    const dateValue = dateRaw ? new Date(dateRaw) : null;
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const row = await dbPool.query(
+      "SELECT id FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
+      [txId, owner.ownerId, goalId]
+    );
+    if (!row.rows.length) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    if (type === "expense") {
+      const totalWithout = await getGoalTotal(owner.ownerId, goalId, txId);
+      if (amount > totalWithout) {
+        return res.status(400).json({ error: "Недостаточно средств в цели" });
+      }
+    }
+    await dbPool.query(
+      `UPDATE goal_transactions
+       SET type = $1, amount = $2, label = $3, account = $4, created_at = $5
+       WHERE id = $6 AND owner_id = $7 AND goal_id = $8`,
+      [
+        type,
+        amount,
+        label,
+        account,
+        dateValue && !Number.isNaN(dateValue.getTime())
+          ? dateValue.toISOString()
+          : new Date().toISOString(),
+        txId,
+        owner.ownerId,
+        goalId,
+      ]
+    );
+    res.json({ id: txId, goalId, type, amount, label, account: account || "" });
+  } catch (err) {
+    console.error("Update goal transaction failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update goal transaction" });
+  }
+});
+
+app.delete("/api/goals/:id/transactions/:txId", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const goalId = String(req.params.id || "");
+    const txId = String(req.params.txId || "");
+    if (!goalId || !txId) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    if (!dbPool) {
+      return res.status(400).json({ error: "Database unavailable" });
+    }
+    const result = await dbPool.query(
+      "DELETE FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
+      [txId, owner.ownerId, goalId]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete goal transaction failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete goal transaction" });
   }
 });
 
@@ -3503,10 +3775,12 @@ initDb()
     app.listen(port, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${port}`);
     });
+    startGoalNotificationLoop();
   })
   .catch((err) => {
     console.error("DB init failed:", err?.message || err);
     app.listen(port, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${port}`);
     });
+    startGoalNotificationLoop();
   });
