@@ -1583,6 +1583,7 @@ function App() {
   const totalsByCategory = useMemo(() => {
     const totals = {};
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       if (op.type !== "expense") return;
       const key = op.category || "Другое";
       totals[key] = (totals[key] || 0) + Number(op.amount || 0);
@@ -1593,6 +1594,7 @@ function App() {
   const incomeByCategory = useMemo(() => {
     const totals = {};
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       if (op.type !== "income") return;
       const key = op.incomeSource || op.category || "Прочее";
       totals[key] = (totals[key] || 0) + Number(op.amount || 0);
@@ -1604,6 +1606,7 @@ function App() {
     const totals = new Map();
     incomeSources.forEach((src) => totals.set(src.name, 0));
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       if (op.type !== "income") return;
       const key = op.incomeSource || op.category || "Прочее";
       totals.set(key, (totals.get(key) || 0) + Number(op.amount || 0));
@@ -1640,6 +1643,7 @@ function App() {
     let income = 0;
     let expense = 0;
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       const value = Number(op.amount || 0);
       const include = includeMap.has(op.account)
         ? includeMap.get(op.account)
@@ -1652,7 +1656,9 @@ function App() {
       income,
       expense,
       balance: openingTotal + income - expense,
-      expenseCount: operations.filter((op) => op.type === "expense").length,
+      expenseCount: operations.filter(
+        (op) => op.type === "expense" && !op.excludeFromSummary
+      ).length,
     };
   }, [operations, accounts]);
 
@@ -1676,6 +1682,7 @@ function App() {
     let totalIncome = 0;
     let totalExpense = 0;
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       const include = includeMap.has(op.account)
         ? includeMap.get(op.account)
         : true;
@@ -1880,6 +1887,7 @@ function App() {
 
   const visibleOperations = useMemo(() => {
     return operations.filter((op) => {
+      if (op.excludeFromSummary) return false;
       if (historyFilter.type !== "all" && op.type !== historyFilter.type) return false;
       if (historyFilter.category && op.category !== historyFilter.category) return false;
       return true;
@@ -3237,45 +3245,75 @@ function App() {
                       )}
                     </div>
                     <div className="history-rows">
-                      {group.items.map((op) => (
-                        <button
-                          key={op.id}
-                          className="history-row"
-                          onClick={() =>
-                            setOperationEditor({
-                              mode: "edit",
-                              id: op.id,
-                              label: op.label || op.text || "",
-                              amount: op.amount,
-                              account: op.account,
-                              category: op.category || "Другое",
-                              incomeSource: op.incomeSource || op.category || "",
-                              type: op.type,
-                              date: formatDateInput(
-                                op.createdAt || op.date || op.created_at || ""
-                              ),
-                            })
-                          }
-                        >
-                          <div className="history-row-main">
-                            <span className="history-label">{op.label || op.text}</span>
-                            <span className="history-meta">
-                              {getOperationFlowLine(op)}
-                            </span>
-                          </div>
-                          <div
-                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                      {group.items.map((op) => {
+                        const isLocked = op.sourceType === "goal";
+                        if (isLocked) {
+                          return (
+                            <div key={op.id} className="history-row readonly">
+                              <div className="history-row-main">
+                                <span className="history-label">
+                                  {op.label || op.text}
+                                </span>
+                                <span className="history-meta">
+                                  {getOperationFlowLine(op)}
+                                </span>
+                              </div>
+                              <div
+                                className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                              >
+                                {formatSignedMoney(
+                                  op.amount,
+                                  op.type,
+                                  currencySymbolByCode(
+                                    accountDetail.currencyCode || settings.currencyCode
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            key={op.id}
+                            className="history-row"
+                            onClick={() =>
+                              setOperationEditor({
+                                mode: "edit",
+                                id: op.id,
+                                label: op.label || op.text || "",
+                                amount: op.amount,
+                                account: op.account,
+                                category: op.category || "Другое",
+                                incomeSource: op.incomeSource || op.category || "",
+                                type: op.type,
+                                date: formatDateInput(
+                                  op.createdAt || op.date || op.created_at || ""
+                                ),
+                              })
+                            }
                           >
-                            {formatSignedMoney(
-                              op.amount,
-                              op.type,
-                              currencySymbolByCode(
-                                accountDetail.currencyCode || settings.currencyCode
-                              )
-                            )}
-                          </div>
-                        </button>
-                      ))}
+                            <div className="history-row-main">
+                              <span className="history-label">
+                                {op.label || op.text}
+                              </span>
+                              <span className="history-meta">
+                                {getOperationFlowLine(op)}
+                              </span>
+                            </div>
+                            <div
+                              className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                            >
+                              {formatSignedMoney(
+                                op.amount,
+                                op.type,
+                                currencySymbolByCode(
+                                  accountDetail.currencyCode || settings.currencyCode
+                                )
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 ))

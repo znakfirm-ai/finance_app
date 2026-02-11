@@ -1208,6 +1208,11 @@
   cursor: pointer;
 }
 
+.history-row.readonly {
+  cursor: default;
+  opacity: 0.9;
+}
+
 .history-row-main {
   display: flex;
   flex-direction: column;

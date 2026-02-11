@@ -143,7 +143,10 @@ async function initDb() {
       label text,
       label_emoji text,
       amount_text text,
-      flow_line text
+      flow_line text,
+      exclude_from_summary boolean NOT NULL DEFAULT false,
+      source_type text,
+      source_id text
     );
   `);
   try {
@@ -162,6 +165,15 @@ async function initDb() {
   );
   await dbPool.query(
     "ALTER TABLE operations ADD COLUMN IF NOT EXISTS income_source text;"
+  );
+  await dbPool.query(
+    "ALTER TABLE operations ADD COLUMN IF NOT EXISTS exclude_from_summary boolean NOT NULL DEFAULT false;"
+  );
+  await dbPool.query(
+    "ALTER TABLE operations ADD COLUMN IF NOT EXISTS source_type text;"
+  );
+  await dbPool.query(
+    "ALTER TABLE operations ADD COLUMN IF NOT EXISTS source_id text;"
   );
   await dbPool.query(
     "UPDATE operations SET amount_cents = ROUND(amount * 100) WHERE amount_cents IS NULL;"
@@ -321,6 +333,9 @@ async function initDb() {
     "ALTER TABLE goal_transactions ADD COLUMN IF NOT EXISTS account text;"
   );
   await dbPool.query(
+    "ALTER TABLE goal_transactions ADD COLUMN IF NOT EXISTS operation_id text;"
+  );
+  await dbPool.query(
     "ALTER TABLE goal_transactions ADD COLUMN IF NOT EXISTS label text;"
   );
   await dbPool.query(
@@ -346,9 +361,9 @@ async function saveOperation(operation) {
     INSERT INTO operations (
       id, text, type, amount, amount_cents, category, account, account_specified,
       telegram_user_id, created_at, label, label_emoji, amount_text, flow_line, source_message_id,
-      income_source
+      income_source, exclude_from_summary, source_type, source_id
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
     )
   `;
   const values = [
@@ -368,6 +383,9 @@ async function saveOperation(operation) {
     operation.flowLine,
     operation.sourceMessageId || null,
     operation.incomeSource || null,
+    operation.excludeFromSummary === true,
+    operation.sourceType || null,
+    operation.sourceId || null,
   ];
   await dbPool.query(query, values);
   return operation;
@@ -435,7 +453,7 @@ async function listOperations({
   let query = `
     SELECT id, text, type, amount, amount_cents, category, account, account_specified,
            telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
-           source_message_id, income_source
+           source_message_id, income_source, exclude_from_summary, source_type, source_id
     FROM operations
   `;
   const params = [];
@@ -512,6 +530,9 @@ async function listOperations({
     flowLine: row.flow_line,
     sourceMessageId: row.source_message_id,
     incomeSource: row.income_source || null,
+    excludeFromSummary: row.exclude_from_summary === true,
+    sourceType: row.source_type || null,
+    sourceId: row.source_id || null,
   }));
 }
 
@@ -528,7 +549,7 @@ async function getOperationById(operationId, telegramUserId) {
   const result = await dbPool.query(
     `SELECT id, text, type, amount, amount_cents, category, account, account_specified,
             telegram_user_id, created_at, label, label_emoji, amount_text, flow_line,
-            source_message_id, income_source
+            source_message_id, income_source, exclude_from_summary, source_type, source_id
      FROM operations
      WHERE id = $1 AND telegram_user_id = $2
      LIMIT 1`,
@@ -559,6 +580,9 @@ async function getOperationById(operationId, telegramUserId) {
     flowLine: row.flow_line,
     sourceMessageId: row.source_message_id,
     incomeSource: row.income_source || null,
+    excludeFromSummary: row.exclude_from_summary === true,
+    sourceType: row.source_type || null,
+    sourceId: row.source_id || null,
   };
 }
 
@@ -1261,6 +1285,79 @@ async function getGoalTotal(ownerId, goalId, excludeId = null) {
   const { rows } = await dbPool.query(query, params);
   const total = rows[0]?.total;
   return total !== null && total !== undefined ? Number(total) : 0;
+}
+
+async function upsertGoalTransferOperation(client, payload) {
+  const {
+    opId,
+    ownerId,
+    account,
+    type,
+    amount,
+    createdAt,
+    goalName,
+    sourceId,
+  } = payload;
+  if (!client || !opId || !ownerId || !account) return;
+  const amountValue = Number(amount || 0);
+  const amountCents = Math.round(amountValue * 100);
+  const label = goalName ? `Цель: ${goalName}` : "Цель";
+  const flowLine = type === "income" ? `${account} → Цель` : `Цель → ${account}`;
+  await client.query(
+    `INSERT INTO operations (
+        id, text, type, amount, amount_cents, category, account, account_specified,
+        telegram_user_id, created_at, label, label_emoji, amount_text, flow_line, source_message_id,
+        income_source, exclude_from_summary, source_type, source_id
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        text = EXCLUDED.text,
+        type = EXCLUDED.type,
+        amount = EXCLUDED.amount,
+        amount_cents = EXCLUDED.amount_cents,
+        category = EXCLUDED.category,
+        account = EXCLUDED.account,
+        account_specified = EXCLUDED.account_specified,
+        created_at = EXCLUDED.created_at,
+        label = EXCLUDED.label,
+        label_emoji = EXCLUDED.label_emoji,
+        amount_text = EXCLUDED.amount_text,
+        flow_line = EXCLUDED.flow_line,
+        income_source = EXCLUDED.income_source,
+        exclude_from_summary = EXCLUDED.exclude_from_summary,
+        source_type = EXCLUDED.source_type,
+        source_id = EXCLUDED.source_id`,
+    [
+      opId,
+      label,
+      type,
+      amountValue,
+      amountCents,
+      "Цели",
+      account,
+      true,
+      ownerId,
+      createdAt,
+      label,
+      null,
+      null,
+      flowLine,
+      null,
+      null,
+      true,
+      "goal",
+      sourceId,
+    ]
+  );
+}
+
+async function deleteGoalTransferOperation(client, opId, ownerId) {
+  if (!client || !opId || !ownerId) return;
+  await client.query(
+    "DELETE FROM operations WHERE id = $1 AND telegram_user_id = $2",
+    [opId, ownerId]
+  );
 }
 
 async function getTelegramVoiceText(fileId) {
@@ -3300,6 +3397,10 @@ app.put("/api/accounts/:id", async (req, res) => {
       "UPDATE operations SET account = $1 WHERE telegram_user_id = $2 AND account = $3",
       [name, owner.ownerId, oldName]
     );
+    await dbPool.query(
+      "UPDATE goal_transactions SET account = $1 WHERE owner_id = $2 AND account = $3",
+      [name, owner.ownerId, oldName]
+    );
     res.json({
       id,
       name,
@@ -3348,6 +3449,10 @@ app.delete("/api/accounts/:id", async (req, res) => {
     const newName = fallback.rows[0].name;
     await dbPool.query(
       "UPDATE operations SET account = $1 WHERE telegram_user_id = $2 AND account = $3",
+      [newName, owner.ownerId, oldName]
+    );
+    await dbPool.query(
+      "UPDATE goal_transactions SET account = $1 WHERE owner_id = $2 AND account = $3",
       [newName, owner.ownerId, oldName]
     );
     const result = await dbPool.query(
@@ -3406,7 +3511,6 @@ app.post("/api/goals", async (req, res) => {
       : null;
     const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
     const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
-    const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
     const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
@@ -3596,12 +3700,13 @@ app.post("/api/goals/:id/transactions", async (req, res) => {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const goalCheck = await dbPool.query(
-      "SELECT id FROM goals WHERE id = $1 AND owner_id = $2",
+      "SELECT id, name FROM goals WHERE id = $1 AND owner_id = $2",
       [goalId, owner.ownerId]
     );
     if (!goalCheck.rows.length) {
       return res.status(404).json({ error: "Goal not found" });
     }
+    const goalName = goalCheck.rows[0]?.name || "Цель";
     if (type === "expense") {
       const currentTotal = await getGoalTotal(owner.ownerId, goalId);
       if (amount > currentTotal) {
@@ -3609,22 +3714,48 @@ app.post("/api/goals/:id/transactions", async (req, res) => {
       }
     }
     const id = `gtrx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    await dbPool.query(
-      `INSERT INTO goal_transactions (id, goal_id, owner_id, type, amount, label, account, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        id,
-        goalId,
-        owner.ownerId,
-        type,
-        amount,
-        label,
-        account,
-        dateValue && !Number.isNaN(dateValue.getTime())
-          ? dateValue.toISOString()
-          : new Date().toISOString(),
-      ]
-    );
+    const createdAtValue =
+      dateValue && !Number.isNaN(dateValue.getTime())
+        ? dateValue.toISOString()
+        : new Date().toISOString();
+    const operationId = account ? `op_goal_${id}` : null;
+    const client = await dbPool.connect();
+    try {
+      await client.query("BEGIN");
+      if (account && operationId) {
+        await upsertGoalTransferOperation(client, {
+          opId: operationId,
+          ownerId: owner.ownerId,
+          account,
+          type,
+          amount,
+          createdAt: createdAtValue,
+          goalName,
+          sourceId: id,
+        });
+      }
+      await client.query(
+        `INSERT INTO goal_transactions (id, goal_id, owner_id, type, amount, label, account, operation_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          id,
+          goalId,
+          owner.ownerId,
+          type,
+          amount,
+          label,
+          account,
+          operationId,
+          createdAtValue,
+        ]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
     res.json({
       id,
       goalId,
@@ -3670,35 +3801,71 @@ app.put("/api/goals/:id/transactions/:txId", async (req, res) => {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const row = await dbPool.query(
-      "SELECT id FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
+      "SELECT id, operation_id FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
       [txId, owner.ownerId, goalId]
     );
     if (!row.rows.length) {
       return res.status(404).json({ error: "Transaction not found" });
     }
+    const existingOperationId = row.rows[0]?.operation_id || null;
+    const goalRow = await dbPool.query(
+      "SELECT name FROM goals WHERE id = $1 AND owner_id = $2",
+      [goalId, owner.ownerId]
+    );
+    const goalName = goalRow.rows[0]?.name || "Цель";
     if (type === "expense") {
       const totalWithout = await getGoalTotal(owner.ownerId, goalId, txId);
       if (amount > totalWithout) {
         return res.status(400).json({ error: "Недостаточно средств в цели" });
       }
     }
-    await dbPool.query(
-      `UPDATE goal_transactions
-       SET type = $1, amount = $2, label = $3, account = $4, created_at = $5
-       WHERE id = $6 AND owner_id = $7 AND goal_id = $8`,
-      [
-        type,
-        amount,
-        label,
-        account,
-        dateValue && !Number.isNaN(dateValue.getTime())
-          ? dateValue.toISOString()
-          : new Date().toISOString(),
-        txId,
-        owner.ownerId,
-        goalId,
-      ]
-    );
+    const createdAtValue =
+      dateValue && !Number.isNaN(dateValue.getTime())
+        ? dateValue.toISOString()
+        : new Date().toISOString();
+    const nextOperationId = account
+      ? existingOperationId || `op_goal_${txId}`
+      : null;
+    const client = await dbPool.connect();
+    try {
+      await client.query("BEGIN");
+      if (account && nextOperationId) {
+        await upsertGoalTransferOperation(client, {
+          opId: nextOperationId,
+          ownerId: owner.ownerId,
+          account,
+          type,
+          amount,
+          createdAt: createdAtValue,
+          goalName,
+          sourceId: txId,
+        });
+      } else if (!account && existingOperationId) {
+        await deleteGoalTransferOperation(client, existingOperationId, owner.ownerId);
+      }
+      await client.query(
+        `UPDATE goal_transactions
+         SET type = $1, amount = $2, label = $3, account = $4, operation_id = $5, created_at = $6
+         WHERE id = $7 AND owner_id = $8 AND goal_id = $9`,
+        [
+          type,
+          amount,
+          label,
+          account,
+          nextOperationId,
+          createdAtValue,
+          txId,
+          owner.ownerId,
+          goalId,
+        ]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
     res.json({ id: txId, goalId, type, amount, label, account: account || "" });
   } catch (err) {
     console.error("Update goal transaction failed:", err?.message || err);
@@ -3723,12 +3890,30 @@ app.delete("/api/goals/:id/transactions/:txId", async (req, res) => {
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
-    const result = await dbPool.query(
-      "DELETE FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
+    const existing = await dbPool.query(
+      "SELECT operation_id FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
       [txId, owner.ownerId, goalId]
     );
-    if (!result.rowCount) {
+    if (!existing.rows.length) {
       return res.status(404).json({ error: "Transaction not found" });
+    }
+    const operationId = existing.rows[0]?.operation_id || null;
+    const client = await dbPool.connect();
+    try {
+      await client.query("BEGIN");
+      if (operationId) {
+        await deleteGoalTransferOperation(client, operationId, owner.ownerId);
+      }
+      await client.query(
+        "DELETE FROM goal_transactions WHERE id = $1 AND owner_id = $2 AND goal_id = $3",
+        [txId, owner.ownerId, goalId]
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
     }
     res.json({ ok: true });
   } catch (err) {
