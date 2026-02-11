@@ -3520,6 +3520,7 @@ app.post("/api/goals", async (req, res) => {
     const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
     const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
     const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
+    const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
