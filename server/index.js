@@ -274,6 +274,7 @@ async function initDb() {
       notify boolean NOT NULL DEFAULT false,
       notify_frequency text,
       notify_start_date date,
+      notify_time text,
       notify_last_sent timestamptz,
       created_at timestamptz NOT NULL DEFAULT now()
     );
@@ -293,6 +294,9 @@ async function initDb() {
   );
   await dbPool.query(
     "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify_start_date date;"
+  );
+  await dbPool.query(
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify_time text;"
   );
   await dbPool.query(
     "ALTER TABLE goals ADD COLUMN IF NOT EXISTS notify_last_sent timestamptz;"
@@ -818,6 +822,13 @@ function getPeriodMs(freq) {
   return null;
 }
 
+function parseNotifyTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return match ? raw : null;
+}
+
 async function runGoalNotificationCheck() {
   if (!dbPool || !TELEGRAM_API) return;
   const { rows } = await dbPool.query(`
@@ -828,6 +839,7 @@ async function runGoalNotificationCheck() {
            g.notify,
            g.notify_frequency,
            g.notify_start_date,
+           g.notify_time,
            g.notify_last_sent,
            COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END), 0) AS total
     FROM goals g
@@ -840,12 +852,23 @@ async function runGoalNotificationCheck() {
   for (const row of rows) {
     const startDate = row.notify_start_date ? new Date(row.notify_start_date) : null;
     if (!startDate || Number.isNaN(startDate.getTime())) continue;
+    const notifyTime = parseNotifyTime(row.notify_time);
+    if (notifyTime) {
+      const [hours, minutes] = notifyTime.split(":").map((part) => Number(part));
+      startDate.setHours(hours, minutes, 0, 0);
+    }
     if (now < startDate) continue;
     const freq = row.notify_frequency;
     const periodMs = getPeriodMs(freq);
     if (!periodMs) continue;
     const lastSent = row.notify_last_sent ? new Date(row.notify_last_sent) : null;
     if (lastSent && now.getTime() - lastSent.getTime() < periodMs) continue;
+    if (notifyTime) {
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      const [hours, minutes] = notifyTime.split(":").map((part) => Number(part));
+      const targetMinutes = hours * 60 + minutes;
+      if (nowMinutes < targetMinutes) continue;
+    }
     try {
       await sendGoalNotification(row, Number(row.total || 0));
       await dbPool.query(
@@ -1143,6 +1166,7 @@ async function getGoalsForOwner(ownerId) {
            g.notify,
            g.notify_frequency,
            g.notify_start_date,
+           g.notify_time,
            g.notify_last_sent,
            g.created_at,
            COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END), 0) AS total
@@ -1169,6 +1193,7 @@ async function getGoalsForOwner(ownerId) {
     notifyStartDate: row.notify_start_date
       ? new Date(row.notify_start_date).toISOString()
       : null,
+    notifyTime: row.notify_time || null,
     notifyLastSent: row.notify_last_sent ? row.notify_last_sent.toISOString() : null,
     createdAt: row.created_at ? row.created_at.toISOString() : null,
     total: row.total !== null && row.total !== undefined ? Number(row.total) : 0,
@@ -3381,13 +3406,15 @@ app.post("/api/goals", async (req, res) => {
       : null;
     const notifyStartRaw = String(req.body?.notifyStartDate || "").trim();
     const notifyStartDate = notifyStartRaw ? new Date(notifyStartRaw) : null;
+    const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
+    const notifyTime = notify ? parseNotifyTime(req.body?.notifyTime) : null;
     if (!dbPool) {
       return res.status(400).json({ error: "Database unavailable" });
     }
     const id = `goal_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     await dbPool.query(
-      `INSERT INTO goals (id, owner_id, name, target_amount, color, target_date, notify, notify_frequency, notify_start_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO goals (id, owner_id, name, target_amount, color, target_date, notify, notify_frequency, notify_start_date, notify_time)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         owner.ownerId,
@@ -3400,6 +3427,7 @@ app.post("/api/goals", async (req, res) => {
         notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
           ? notifyStartDate.toISOString()
           : null,
+        notifyTime,
       ]
     );
     res.json({
@@ -3414,6 +3442,7 @@ app.post("/api/goals", async (req, res) => {
         notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
           ? notifyStartDate.toISOString()
           : null,
+      notifyTime: notifyTime || null,
       createdAt: new Date().toISOString(),
       total: 0,
     });
@@ -3460,8 +3489,9 @@ app.put("/api/goals/:id", async (req, res) => {
            target_date = $4,
            notify = $5,
            notify_frequency = $6,
-           notify_start_date = $7
-       WHERE id = $8 AND owner_id = $9`,
+           notify_start_date = $7,
+           notify_time = $8
+       WHERE id = $9 AND owner_id = $10`,
       [
         name,
         targetAmount,
@@ -3472,6 +3502,7 @@ app.put("/api/goals/:id", async (req, res) => {
         notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
           ? notifyStartDate.toISOString()
           : null,
+        notifyTime,
         id,
         owner.ownerId,
       ]
@@ -3491,6 +3522,7 @@ app.put("/api/goals/:id", async (req, res) => {
         notifyStartDate && !Number.isNaN(notifyStartDate.getTime())
           ? notifyStartDate.toISOString()
           : null,
+      notifyTime: notifyTime || null,
     });
   } catch (err) {
     console.error("Update goal failed:", err?.message || err);

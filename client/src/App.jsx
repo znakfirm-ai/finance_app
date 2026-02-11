@@ -368,6 +368,7 @@ function App() {
   const [goalNotifyOpen, setGoalNotifyOpen] = useState(false);
   const [goalNotifyFrequency, setGoalNotifyFrequency] = useState("monthly");
   const [goalNotifyStartDate, setGoalNotifyStartDate] = useState("");
+  const [goalNotifyTime, setGoalNotifyTime] = useState("");
   const [goalErrors, setGoalErrors] = useState({});
   const [goalSaveMessage, setGoalSaveMessage] = useState("");
   const [goalTransfer, setGoalTransfer] = useState(null);
@@ -737,6 +738,7 @@ function App() {
       setGoalNotify(false);
       setGoalNotifyFrequency("monthly");
       setGoalNotifyStartDate("");
+      setGoalNotifyTime("");
       return;
     }
     setGoalName(goalEditor.name || "");
@@ -752,6 +754,7 @@ function App() {
     setGoalNotifyStartDate(
       goalEditor.notifyStartDate ? formatDateInput(goalEditor.notifyStartDate) : ""
     );
+    setGoalNotifyTime(goalEditor.notifyTime || "");
   }, [goalEditor?.id, goalEditor?.mode, goalEditor?.name]);
 
   useEffect(() => {
@@ -767,6 +770,7 @@ function App() {
       notify: latest.notify === true,
       notifyFrequency: latest.notifyFrequency || null,
       notifyStartDate: latest.notifyStartDate || null,
+      notifyTime: latest.notifyTime || null,
       createdAt: latest.createdAt || null,
       total: latest.total,
     }));
@@ -1224,6 +1228,7 @@ function App() {
     if (goalNotify) {
       if (!goalNotifyFrequency) nextErrors.notifyFrequency = true;
       if (!goalNotifyStartDate) nextErrors.notifyStartDate = true;
+      if (!goalNotifyTime) nextErrors.notifyTime = true;
     }
     setGoalErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
@@ -1240,6 +1245,7 @@ function App() {
         notify: goalNotify === true,
         notifyFrequency: goalNotify ? goalNotifyFrequency : null,
         notifyStartDate: goalNotify ? goalNotifyStartDate || null : null,
+        notifyTime: goalNotify ? goalNotifyTime || null : null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -1271,6 +1277,7 @@ function App() {
     if (goalNotify) {
       if (!goalNotifyFrequency) nextErrors.notifyFrequency = true;
       if (!goalNotifyStartDate) nextErrors.notifyStartDate = true;
+      if (!goalNotifyTime) nextErrors.notifyTime = true;
     }
     setGoalErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
@@ -1287,6 +1294,7 @@ function App() {
         notify: goalNotify === true,
         notifyFrequency: goalNotify ? goalNotifyFrequency : null,
         notifyStartDate: goalNotify ? goalNotifyStartDate || null : null,
+        notifyTime: goalNotify ? goalNotifyTime || null : null,
       };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
@@ -2581,6 +2589,12 @@ function App() {
                   if (next && !goalNotifyStartDate) {
                     setGoalNotifyStartDate(formatDateInput(new Date()));
                   }
+                  if (next && !goalNotifyFrequency) {
+                    setGoalNotifyFrequency("monthly");
+                  }
+                  if (next && !goalNotifyTime) {
+                    setGoalNotifyTime("09:00");
+                  }
                   return next;
                 })
               }
@@ -2616,6 +2630,14 @@ function App() {
                 {goalErrors.notifyStartDate && (
                   <div className="error">Укажите дату</div>
                 )}
+                <label className="label">Время</label>
+                <input
+                  className={`input ${goalErrors.notifyTime ? "invalid" : ""}`}
+                  type="time"
+                  value={goalNotifyTime || "09:00"}
+                  onChange={(e) => setGoalNotifyTime(e.target.value)}
+                />
+                {goalErrors.notifyTime && <div className="error">Укажите время</div>}
               </div>
             )}
             <div className="row">
@@ -2918,6 +2940,7 @@ function App() {
                   notify: goalDetail.notify === true,
                   notifyFrequency: goalDetail.notifyFrequency || null,
                   notifyStartDate: goalDetail.notifyStartDate || null,
+                  notifyTime: goalDetail.notifyTime || null,
                   mode: "edit",
                 })
               }
@@ -3549,6 +3572,7 @@ function App() {
                         notify: goal.notify === true,
                         notifyFrequency: goal.notifyFrequency || null,
                         notifyStartDate: goal.notifyStartDate || null,
+                        notifyTime: goal.notifyTime || null,
                         total: goal.currentAmount,
                         createdAt: goal.createdAt || null,
                       });
