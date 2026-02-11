@@ -3910,6 +3910,10 @@ function App() {
                           }}
                         />
                       </div>
+                      <div className="debt-card-sub">
+                        Возвращено {formatMoney(item.paidTotal, debtCurrencySymbol)} из{" "}
+                        {formatMoney(item.totalAmount, debtCurrencySymbol)}
+                      </div>
                     </button>
                   );
                 })

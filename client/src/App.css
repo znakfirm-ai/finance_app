@@ -1396,6 +1396,12 @@
   gap: 8px;
 }
 
+.debt-card-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .history-amount {
   font-size: 13px;
   font-weight: 700;
