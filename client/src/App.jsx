@@ -1314,6 +1314,7 @@ function App() {
           color: data.color,
           targetDate: data.targetDate,
           notify: data.notify,
+          notifyTime: data.notifyTime || null,
         }));
       }
       setGoalSaveMessage("Сохранено");

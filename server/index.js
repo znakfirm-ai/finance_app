@@ -907,7 +907,7 @@ async function runGoalNotificationCheck() {
 
 function startGoalNotificationLoop() {
   if (!dbPool || !TELEGRAM_API) return;
-  const intervalMs = 15 * 60 * 1000;
+  const intervalMs = 60 * 1000;
   setInterval(() => {
     runGoalNotificationCheck().catch((err) =>
       console.error("Goal notification check failed:", err?.message || err)
