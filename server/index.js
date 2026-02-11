@@ -4741,9 +4741,105 @@ app.delete("/api/debts/:id", async (req, res) => {
     if (!id || !dbPool) {
       return res.status(400).json({ error: "Invalid input" });
     }
+    const mode = String(req.body?.mode || "zero").toLowerCase();
+    const transferAccount = String(req.body?.transferAccount || "").trim();
     const client = await dbPool.connect();
     try {
       await client.query("BEGIN");
+      let remaining = 0;
+      let debtKind = null;
+      let debtName = "";
+      if (mode === "transfer") {
+        const debtRow = await client.query(
+          "SELECT id, kind, name, total_amount FROM debts WHERE id = $1 AND owner_id = $2",
+          [id, owner.ownerId]
+        );
+        if (!debtRow.rows.length) {
+          await client.query("ROLLBACK");
+          return res.status(404).json({ error: "Not found" });
+        }
+        debtKind = debtRow.rows[0].kind;
+        debtName = debtRow.rows[0].name || "";
+        const totalAmountRaw = debtRow.rows[0].total_amount;
+        const scheduleRows = await client.query(
+          "SELECT amount, paid, paid_amount FROM debt_schedule WHERE debt_id = $1 AND owner_id = $2",
+          [id, owner.ownerId]
+        );
+        const plannedTotal =
+          totalAmountRaw !== null && totalAmountRaw !== undefined && Number(totalAmountRaw) > 0
+            ? Number(totalAmountRaw)
+            : scheduleRows.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const paidTotal = scheduleRows.rows.reduce((sum, row) => {
+          if (!row.paid) return sum;
+          const value =
+            row.paid_amount !== null && row.paid_amount !== undefined
+              ? Number(row.paid_amount)
+              : Number(row.amount || 0);
+          return sum + value;
+        }, 0);
+        remaining = Math.max(0, roundMoney(plannedTotal - paidTotal));
+        if (remaining > 0) {
+          if (!transferAccount) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ error: "Выберите счет" });
+          }
+          const accountRow = await client.query(
+            "SELECT name FROM accounts WHERE owner_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1",
+            [owner.ownerId, transferAccount]
+          );
+          if (!accountRow.rows.length) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({ error: "Счет не найден" });
+          }
+          const accountName = accountRow.rows[0].name;
+          const categoriesList = await getCategoriesForOwner(owner.ownerId);
+          const incomeSourcesList = await getIncomeSourcesForOwner(owner.ownerId);
+          const opType = debtKind === "owed_to_me" ? "income" : "expense";
+          const incomeSourceName =
+            opType === "income"
+              ? incomeSourcesList.find((s) =>
+                  String(s.name || "").toLowerCase().includes("проч")
+                )?.name ||
+                incomeSourcesList[0]?.name ||
+                "Прочее"
+              : null;
+          const categoryName =
+            opType === "expense"
+              ? categoriesList.find((c) =>
+                  String(c.name || "").toLowerCase().includes("друг")
+                )?.name ||
+                categoriesList[0]?.name ||
+                "Другое"
+              : incomeSourceName || "Прочее";
+          const label =
+            opType === "income" ? `Возврат долга: ${debtName}` : `Списание долга: ${debtName}`;
+          const opId = `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          await client.query(
+            `INSERT INTO operations (
+              id, text, type, amount, category, account, account_specified,
+              telegram_user_id, amount_cents, created_at, label, income_source,
+              exclude_from_summary, source_type, source_id
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+            [
+              opId,
+              label,
+              opType,
+              remaining,
+              categoryName,
+              accountName,
+              true,
+              owner.ownerId,
+              Math.round(remaining * 100),
+              new Date().toISOString(),
+              label,
+              incomeSourceName,
+              false,
+              "debt",
+              id,
+            ]
+          );
+        }
+      }
       await client.query("DELETE FROM debt_schedule WHERE debt_id = $1 AND owner_id = $2", [
         id,
         owner.ownerId,

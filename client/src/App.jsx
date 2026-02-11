@@ -404,6 +404,11 @@ function App() {
   const [debtFrequency, setDebtFrequency] = useState("monthly");
   const [debtNotes, setDebtNotes] = useState("");
   const [debtCurrencyCode, setDebtCurrencyCode] = useState("RUB");
+  const [debtDeleteOpen, setDebtDeleteOpen] = useState(false);
+  const [debtDeleteMode, setDebtDeleteMode] = useState("transfer");
+  const [debtDeleteAccount, setDebtDeleteAccount] = useState("");
+  const [debtDeleteMessage, setDebtDeleteMessage] = useState("");
+  const [debtDeleteTarget, setDebtDeleteTarget] = useState(null);
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
   const [goalTransferAccount, setGoalTransferAccount] = useState("");
@@ -430,6 +435,40 @@ function App() {
   const balanceScrollRef = useRef(null);
   const [showBalanceLeft, setShowBalanceLeft] = useState(false);
   const [showBalanceRight, setShowBalanceRight] = useState(false);
+
+  const openDebtDelete = (target) => {
+    if (!target?.id) return;
+    const allDebts = [...debtsOwed, ...debtsOwe, ...debtsCredit];
+    const found = allDebts.find((item) => item.id === target.id);
+    const remaining =
+      found?.remaining ??
+      target.remaining ??
+      0;
+    const currencyCode =
+      found?.currencyCode ||
+      target.currencyCode ||
+      settings.currencyCode ||
+      "RUB";
+    const defaultAccount = accounts[0]?.name || "";
+    const mode = defaultAccount ? "transfer" : "zero";
+    setDebtDeleteTarget({
+      id: target.id,
+      kind: target.kind || found?.kind,
+      name: target.name || found?.name || "",
+      remaining,
+      currencyCode,
+    });
+    setDebtDeleteMode(mode);
+    setDebtDeleteAccount(defaultAccount);
+    setDebtDeleteMessage("");
+    setDebtDeleteOpen(true);
+  };
+
+  const closeDebtDelete = () => {
+    setDebtDeleteOpen(false);
+    setDebtDeleteTarget(null);
+    setDebtDeleteMessage("");
+  };
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -1643,9 +1682,16 @@ function App() {
   }
 
   async function deleteDebt(id) {
-    if (!confirm("Удалить запись?")) return;
+    if (!id) return;
+    if (debtDeleteMode === "transfer" && accounts.length && !debtDeleteAccount) {
+      setDebtDeleteMessage("Выберите счет");
+      return;
+    }
     try {
-      const payload = {};
+      const payload = {
+        mode: debtDeleteMode,
+        transferAccount: debtDeleteMode === "transfer" ? debtDeleteAccount || null : null,
+      };
       if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/debts/${id}`)), {
@@ -1656,10 +1702,16 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       await loadAllDebts();
+      await loadAccounts();
+      await loadOperations();
+      await loadHistory(true);
       if (debtDetail?.id === id) setDebtDetail(null);
       if (debtEditor?.id === id) setDebtEditor(null);
+      setDebtDeleteOpen(false);
+      setDebtDeleteTarget(null);
+      setDebtDeleteMessage("");
     } catch (e) {
-      setDebtEditorMessage(e.message || "Ошибка");
+      setDebtDeleteMessage(e.message || "Ошибка");
     }
   }
 
@@ -3299,6 +3351,67 @@ function App() {
         return <section className="overview-shell">{goalEditorView}</section>;
       }
 
+      const debtDeletePanel =
+        debtDeleteOpen && debtDeleteTarget ? (
+          <div className="goal-delete">
+            <div className="muted">
+              Остаток:{" "}
+              {formatMoney(
+                debtDeleteTarget.remaining,
+                currencySymbolByCode(debtDeleteTarget.currencyCode)
+              )}
+            </div>
+            <div className="goal-delete-panel">
+              <div className="goal-delete-choice">
+                <button
+                  className={`btn ${debtDeleteMode === "transfer" ? "" : "ghost"}`}
+                  onClick={() => setDebtDeleteMode("transfer")}
+                >
+                  Перевести на счет
+                </button>
+                <button
+                  className={`btn ${debtDeleteMode === "zero" ? "" : "ghost"}`}
+                  onClick={() => setDebtDeleteMode("zero")}
+                >
+                  Обнулить остаток
+                </button>
+              </div>
+              {debtDeleteMode === "transfer" && (
+                <>
+                  <label className="label">Счет</label>
+                  {accounts.length ? (
+                    <select
+                      className="select"
+                      value={debtDeleteAccount}
+                      onChange={(e) => setDebtDeleteAccount(e.target.value)}
+                    >
+                      {accounts.map((acc) => (
+                        <option key={acc.id} value={acc.name}>
+                          {acc.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="muted">Нет счетов для перевода</div>
+                  )}
+                </>
+              )}
+              {debtDeleteMessage && <div className="error">{debtDeleteMessage}</div>}
+              <div className="row">
+                <button
+                  className="btn danger"
+                  onClick={() => deleteDebt(debtDeleteTarget.id)}
+                >
+                  Удалить
+                </button>
+                <button className="btn ghost" onClick={closeDebtDelete}>
+                  Отмена
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null;
+
       const debtEditorView = debtEditor ? (
         <div className="overview-manage">
           <div className="overview-manage-header">
@@ -3468,9 +3581,15 @@ function App() {
               <div className="status success">{debtEditorMessage}</div>
             )}
             {debtEditor.mode === "edit" && (
-              <button className="btn danger" onClick={() => deleteDebt(debtEditor.id)}>
-                Удалить
-              </button>
+              <>
+                <button
+                  className="btn danger"
+                  onClick={() => openDebtDelete(debtEditor)}
+                >
+                  Удалить
+                </button>
+                {debtDeleteTarget?.id === debtEditor.id ? debtDeletePanel : null}
+              </>
             )}
           </div>
         </div>
@@ -3711,6 +3830,10 @@ function App() {
             >
               Редактировать
             </button>
+            <button className="btn danger" onClick={() => openDebtDelete(debtDetail)}>
+              Удалить
+            </button>
+            {debtDeleteTarget?.id === debtDetail.id ? debtDeletePanel : null}
           </section>
         );
       }
