@@ -341,6 +341,53 @@ async function initDb() {
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS goal_transactions_owner_id_idx ON goal_transactions(owner_id);"
   );
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS debts (
+      id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      kind text NOT NULL,
+      name text NOT NULL,
+      principal_amount numeric(12,2) NOT NULL DEFAULT 0,
+      total_amount numeric(12,2) NOT NULL DEFAULT 0,
+      currency_code text,
+      issued_date date,
+      due_date date,
+      rate numeric(8,4),
+      term_months integer,
+      payment_type text,
+      notes text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS debts_owner_id_idx ON debts(owner_id);"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS debts_kind_idx ON debts(owner_id, kind);"
+  );
+
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS debt_schedule (
+      id text PRIMARY KEY,
+      debt_id text NOT NULL,
+      owner_id text NOT NULL,
+      due_date date,
+      amount numeric(12,2) NOT NULL DEFAULT 0,
+      paid boolean NOT NULL DEFAULT false,
+      paid_amount numeric(12,2),
+      paid_at timestamptz,
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS debt_schedule_owner_id_idx ON debt_schedule(owner_id);"
+  );
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS debt_schedule_debt_id_idx ON debt_schedule(debt_id);"
+  );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS goal_transactions_goal_id_idx ON goal_transactions(goal_id);"
   );
@@ -857,6 +904,109 @@ function parseNotifyTime(value) {
   return match ? raw : null;
 }
 
+const DEBT_KIND_MAP = {
+  owed: "owed_to_me",
+  owe: "i_owe",
+  credit: "credit",
+  owed_to_me: "owed_to_me",
+  i_owe: "i_owe",
+};
+
+function normalizeDebtKind(value) {
+  const key = String(value || "").toLowerCase();
+  return DEBT_KIND_MAP[key] || null;
+}
+
+function roundMoney(value) {
+  const num = Number(value) || 0;
+  return Math.round(num * 100) / 100;
+}
+
+function addMonths(baseDate, count) {
+  const date = new Date(baseDate);
+  if (Number.isNaN(date.getTime())) return new Date();
+  const day = date.getDate();
+  date.setMonth(date.getMonth() + count);
+  if (date.getDate() !== day) {
+    date.setDate(0);
+  }
+  return date;
+}
+
+function addDays(baseDate, count) {
+  const date = new Date(baseDate);
+  if (Number.isNaN(date.getTime())) return new Date();
+  date.setDate(date.getDate() + count);
+  return date;
+}
+
+function generateEqualSchedule({
+  totalAmount,
+  paymentsCount,
+  firstPaymentDate,
+  frequency = "monthly",
+}) {
+  const count = Math.max(1, Number(paymentsCount) || 1);
+  const total = roundMoney(totalAmount);
+  if (!total) return [];
+  const base = roundMoney(total / count);
+  let remainder = roundMoney(total - base * count);
+  const entries = [];
+  for (let i = 0; i < count; i += 1) {
+    const amount = i === count - 1 ? roundMoney(base + remainder) : base;
+    const dueDate =
+      frequency === "weekly"
+        ? addDays(firstPaymentDate, i * 7)
+        : addMonths(firstPaymentDate, i);
+    entries.push({
+      dueDate,
+      amount,
+    });
+  }
+  return entries;
+}
+
+function generateCreditSchedule({
+  principal,
+  rate,
+  termMonths,
+  firstPaymentDate,
+  paymentType = "annuity",
+}) {
+  const months = Math.max(1, Number(termMonths) || 1);
+  const baseDate = firstPaymentDate || new Date();
+  const monthlyRate = Number(rate) ? Number(rate) / 12 / 100 : 0;
+  let remaining = Number(principal) || 0;
+  const entries = [];
+  if (!remaining) return entries;
+  if (paymentType === "diff") {
+    const principalPart = remaining / months;
+    for (let i = 0; i < months; i += 1) {
+      const interest = remaining * monthlyRate;
+      const amount = roundMoney(principalPart + interest);
+      const dueDate = addMonths(baseDate, i);
+      entries.push({ dueDate, amount });
+      remaining -= principalPart;
+    }
+  } else {
+    if (monthlyRate === 0) {
+      return generateEqualSchedule({
+        totalAmount: remaining,
+        paymentsCount: months,
+        firstPaymentDate: baseDate,
+        frequency: "monthly",
+      });
+    }
+    const pow = Math.pow(1 + monthlyRate, months);
+    const payment = roundMoney((remaining * monthlyRate * pow) / (pow - 1));
+    for (let i = 0; i < months; i += 1) {
+      const dueDate = addMonths(baseDate, i);
+      entries.push({ dueDate, amount: payment });
+    }
+  }
+  return entries;
+}
+
 async function runGoalNotificationCheck() {
   if (!dbPool || !TELEGRAM_API) return;
   const { rows } = await dbPool.query(`
@@ -1274,6 +1424,126 @@ async function listGoalTransactions({
     account: row.account || "",
     createdAt: row.created_at,
     labelEmoji: row.type === "income" ? "🎯" : "↘️",
+  }));
+}
+
+async function listDebtsForOwner(ownerId, kind) {
+  if (!ownerId || !dbPool) return [];
+  const params = [ownerId, kind];
+  const { rows } = await dbPool.query(
+    `SELECT id, name, kind, principal_amount, total_amount, currency_code, issued_date, due_date,
+            rate, term_months, payment_type, notes, created_at, updated_at
+     FROM debts
+     WHERE owner_id = $1 AND kind = $2
+     ORDER BY created_at DESC`,
+    params
+  );
+  if (!rows.length) return [];
+  const ids = rows.map((row) => row.id);
+  const { rows: scheduleRows } = await dbPool.query(
+    `SELECT debt_id, amount, paid, paid_amount, due_date
+     FROM debt_schedule
+     WHERE owner_id = $1 AND debt_id = ANY($2::text[])`,
+    [ownerId, ids]
+  );
+  const scheduleMap = new Map();
+  scheduleRows.forEach((row) => {
+    if (!scheduleMap.has(row.debt_id)) {
+      scheduleMap.set(row.debt_id, []);
+    }
+    scheduleMap.get(row.debt_id).push(row);
+  });
+  return rows.map((row) => {
+    const schedule = scheduleMap.get(row.id) || [];
+    const plannedTotal =
+      row.total_amount !== null && row.total_amount !== undefined && Number(row.total_amount) > 0
+        ? Number(row.total_amount)
+        : schedule.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const paidTotal = schedule.reduce((sum, item) => {
+      if (!item.paid) return sum;
+      const value =
+        item.paid_amount !== null && item.paid_amount !== undefined
+          ? Number(item.paid_amount)
+          : Number(item.amount || 0);
+      return sum + value;
+    }, 0);
+    const remaining = Math.max(0, plannedTotal - paidTotal);
+    const nextPayment = schedule
+      .filter((item) => !item.paid && item.due_date)
+      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
+    return {
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      principalAmount:
+        row.principal_amount !== null && row.principal_amount !== undefined
+          ? Number(row.principal_amount)
+          : 0,
+      totalAmount: plannedTotal,
+      paidTotal,
+      remaining,
+      currencyCode: row.currency_code || null,
+      issuedDate: row.issued_date ? new Date(row.issued_date).toISOString() : null,
+      dueDate: row.due_date ? new Date(row.due_date).toISOString() : null,
+      rate: row.rate !== null && row.rate !== undefined ? Number(row.rate) : null,
+      termMonths: row.term_months !== null && row.term_months !== undefined ? Number(row.term_months) : null,
+      paymentType: row.payment_type || null,
+      notes: row.notes || "",
+      createdAt: row.created_at ? row.created_at.toISOString() : null,
+      nextPaymentDate: nextPayment?.due_date ? new Date(nextPayment.due_date).toISOString() : null,
+    };
+  });
+}
+
+async function listDebtSchedule({
+  ownerId,
+  debtId,
+  limit = 200,
+  search = null,
+  before = null,
+  from = null,
+  to = null,
+} = {}) {
+  if (!ownerId || !debtId || !dbPool) return [];
+  let query = `
+    SELECT id, due_date, amount, paid, paid_amount, paid_at, note, created_at
+    FROM debt_schedule
+    WHERE owner_id = $1 AND debt_id = $2
+  `;
+  const params = [ownerId, debtId];
+  if (search) {
+    const like = `%${String(search).toLowerCase()}%`;
+    params.push(like);
+    const idx = params.length;
+    query += ` AND (LOWER(COALESCE(note, '')) LIKE $${idx} OR CAST(amount AS text) LIKE $${idx})`;
+  }
+  if (from) {
+    params.push(from);
+    query += ` AND due_date >= $${params.length}`;
+  }
+  if (to) {
+    params.push(to);
+    query += ` AND due_date <= $${params.length}`;
+  }
+  if (before) {
+    params.push(before);
+    query += ` AND due_date < $${params.length}`;
+  }
+  params.push(limit);
+  query += ` ORDER BY due_date DESC NULLS LAST, created_at DESC LIMIT $${params.length}`;
+  const { rows } = await dbPool.query(query, params);
+  return rows.map((row) => ({
+    id: row.id,
+    dueDate: row.due_date ? new Date(row.due_date).toISOString() : null,
+    amount: Number(row.amount),
+    paid: row.paid === true,
+    paidAmount:
+      row.paid_amount !== null && row.paid_amount !== undefined
+        ? Number(row.paid_amount)
+        : null,
+    paidAt: row.paid_at ? row.paid_at.toISOString() : null,
+    note: row.note || "",
+    createdAt: row.created_at ? row.created_at.toISOString() : null,
   }));
 }
 
@@ -4016,6 +4286,396 @@ app.delete("/api/goals/:id/transactions/:txId", async (req, res) => {
   } catch (err) {
     console.error("Delete goal transaction failed:", err?.message || err);
     res.status(500).json({ error: "Failed to delete goal transaction" });
+  }
+});
+
+app.get("/api/debts", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const kind = normalizeDebtKind(req.query?.kind);
+    if (!kind) {
+      return res.status(400).json({ error: "Invalid kind" });
+    }
+    const items = await listDebtsForOwner(owner.ownerId, kind);
+    res.json(items);
+  } catch (err) {
+    console.error("Load debts failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load debts" });
+  }
+});
+
+app.post("/api/debts", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const kind = normalizeDebtKind(req.body?.kind);
+    if (!kind) return res.status(400).json({ error: "Invalid kind" });
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Name is required" });
+    const principalAmount = roundMoney(req.body?.principalAmount || 0);
+    const totalAmount = roundMoney(req.body?.totalAmount || 0);
+    const currencyCode = String(req.body?.currencyCode || "").trim() || null;
+    const issuedDate = req.body?.issuedDate ? new Date(req.body.issuedDate) : null;
+    const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : null;
+    const rate = Number(req.body?.rate);
+    const termMonths = Number(req.body?.termMonths);
+    const paymentType = String(req.body?.paymentType || "").trim().toLowerCase();
+    const paymentsCount = Number(req.body?.paymentsCount);
+    const firstPaymentDate = req.body?.firstPaymentDate
+      ? new Date(req.body.firstPaymentDate)
+      : null;
+    const frequency = String(req.body?.frequency || "monthly").toLowerCase();
+    const notes = String(req.body?.notes || "").trim();
+    if (!dbPool) return res.status(400).json({ error: "Database unavailable" });
+    const id = `debt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const scheduleBaseDate =
+      firstPaymentDate && !Number.isNaN(firstPaymentDate.getTime())
+        ? firstPaymentDate
+        : issuedDate && !Number.isNaN(issuedDate.getTime())
+          ? issuedDate
+          : new Date();
+    let schedule = [];
+    if (kind === "credit") {
+      schedule = generateCreditSchedule({
+        principal: principalAmount || totalAmount,
+        rate: Number.isFinite(rate) ? rate : 0,
+        termMonths: Number.isFinite(termMonths) ? termMonths : paymentsCount || 1,
+        firstPaymentDate: scheduleBaseDate,
+        paymentType: paymentType === "diff" ? "diff" : "annuity",
+      });
+    } else if (totalAmount || principalAmount) {
+      const baseAmount = totalAmount || principalAmount;
+      schedule = generateEqualSchedule({
+        totalAmount: baseAmount,
+        paymentsCount: Number.isFinite(paymentsCount) ? paymentsCount : termMonths || 1,
+        firstPaymentDate: scheduleBaseDate,
+        frequency: frequency === "weekly" ? "weekly" : "monthly",
+      });
+    }
+    const client = await dbPool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO debts (id, owner_id, kind, name, principal_amount, total_amount, currency_code,
+                            issued_date, due_date, rate, term_months, payment_type, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [
+          id,
+          owner.ownerId,
+          kind,
+          name,
+          principalAmount,
+          totalAmount || principalAmount,
+          currencyCode,
+          issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate.toISOString() : null,
+          dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+          Number.isFinite(rate) ? rate : null,
+          Number.isFinite(termMonths) ? termMonths : null,
+          paymentType || null,
+          notes || null,
+        ]
+      );
+      if (schedule.length) {
+        const values = schedule.map((entry, idx) => [
+          `sched_${id}_${idx}`,
+          id,
+          owner.ownerId,
+          entry.dueDate && !Number.isNaN(entry.dueDate.getTime())
+            ? entry.dueDate.toISOString()
+            : null,
+          roundMoney(entry.amount),
+        ]);
+        const placeholders = values
+          .map(
+            (_, idx) =>
+              `($${idx * 5 + 1}, $${idx * 5 + 2}, $${idx * 5 + 3}, $${idx * 5 + 4}, $${idx * 5 + 5})`
+          )
+          .join(",");
+        await client.query(
+          `INSERT INTO debt_schedule (id, debt_id, owner_id, due_date, amount)
+           VALUES ${placeholders}`,
+          values.flat()
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+    const items = await listDebtsForOwner(owner.ownerId, kind);
+    const created = items.find((item) => item.id === id);
+    res.json(created || { id, name, kind });
+  } catch (err) {
+    console.error("Create debt failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create debt" });
+  }
+});
+
+app.put("/api/debts/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const name = String(req.body?.name || "").trim();
+    if (!id || !name) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const kind = normalizeDebtKind(req.body?.kind);
+    if (!kind) return res.status(400).json({ error: "Invalid kind" });
+    const principalAmount = roundMoney(req.body?.principalAmount || 0);
+    const totalAmount = roundMoney(req.body?.totalAmount || 0);
+    const currencyCode = String(req.body?.currencyCode || "").trim() || null;
+    const issuedDate = req.body?.issuedDate ? new Date(req.body.issuedDate) : null;
+    const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : null;
+    const rate = Number(req.body?.rate);
+    const termMonths = Number(req.body?.termMonths);
+    const paymentType = String(req.body?.paymentType || "").trim().toLowerCase();
+    const notes = String(req.body?.notes || "").trim();
+    if (!dbPool) return res.status(400).json({ error: "Database unavailable" });
+    const result = await dbPool.query(
+      `UPDATE debts
+       SET name = $1,
+           kind = $2,
+           principal_amount = $3,
+           total_amount = $4,
+           currency_code = $5,
+           issued_date = $6,
+           due_date = $7,
+           rate = $8,
+           term_months = $9,
+           payment_type = $10,
+           notes = $11,
+           updated_at = now()
+       WHERE id = $12 AND owner_id = $13`,
+      [
+        name,
+        kind,
+        principalAmount,
+        totalAmount || principalAmount,
+        currencyCode,
+        issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate.toISOString() : null,
+        dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+        Number.isFinite(rate) ? rate : null,
+        Number.isFinite(termMonths) ? termMonths : null,
+        paymentType || null,
+        notes || null,
+        id,
+        owner.ownerId,
+      ]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    const items = await listDebtsForOwner(owner.ownerId, kind);
+    const updated = items.find((item) => item.id === id);
+    res.json(updated || { id, name, kind });
+  } catch (err) {
+    console.error("Update debt failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update debt" });
+  }
+});
+
+app.delete("/api/debts/:id", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id || !dbPool) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const client = await dbPool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM debt_schedule WHERE debt_id = $1 AND owner_id = $2", [
+        id,
+        owner.ownerId,
+      ]);
+      const result = await client.query("DELETE FROM debts WHERE id = $1 AND owner_id = $2", [
+        id,
+        owner.ownerId,
+      ]);
+      await client.query("COMMIT");
+      if (!result.rowCount) {
+        return res.status(404).json({ error: "Not found" });
+      }
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete debt failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete debt" });
+  }
+});
+
+app.get("/api/debts/:id/schedule", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    const limit = Number(req.query?.limit || 200);
+    const search = req.query?.q ? String(req.query.q) : null;
+    const before = req.query?.before ? String(req.query.before) : null;
+    const from = req.query?.from ? String(req.query.from) : null;
+    const to = req.query?.to ? String(req.query.to) : null;
+    const items = await listDebtSchedule({
+      ownerId: owner.ownerId,
+      debtId: id,
+      limit: Number.isFinite(limit) ? limit : 200,
+      search,
+      before,
+      from,
+      to,
+    });
+    res.json(items);
+  } catch (err) {
+    console.error("Load debt schedule failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load schedule" });
+  }
+});
+
+app.post("/api/debts/:id/schedule", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const debtId = String(req.params.id || "");
+    const amount = roundMoney(req.body?.amount || 0);
+    if (!debtId || !amount) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : null;
+    const note = String(req.body?.note || "").trim();
+    const id = `sched_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    await dbPool.query(
+      `INSERT INTO debt_schedule (id, debt_id, owner_id, due_date, amount, note)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [
+        id,
+        debtId,
+        owner.ownerId,
+        dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+        amount,
+        note || null,
+      ]
+    );
+    res.json({ id, debtId, amount, note, dueDate: dueDate?.toISOString() || null });
+  } catch (err) {
+    console.error("Create schedule entry failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create entry" });
+  }
+});
+
+app.put("/api/debts/:id/schedule/:sid", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const debtId = String(req.params.id || "");
+    const sid = String(req.params.sid || "");
+    const amount = roundMoney(req.body?.amount || 0);
+    if (!debtId || !sid || !amount) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : null;
+    const note = String(req.body?.note || "").trim();
+    const paid = req.body?.paid === true || req.body?.paid === "true";
+    const paidAmount = req.body?.paidAmount !== undefined ? roundMoney(req.body.paidAmount) : null;
+    const result = await dbPool.query(
+      `UPDATE debt_schedule
+       SET due_date = $1,
+           amount = $2,
+           note = $3,
+           paid = $4,
+           paid_amount = $5,
+           paid_at = $6
+       WHERE id = $7 AND owner_id = $8 AND debt_id = $9`,
+      [
+        dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+        amount,
+        note || null,
+        paid,
+        paidAmount,
+        paid ? new Date().toISOString() : null,
+        sid,
+        owner.ownerId,
+        debtId,
+      ]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Update schedule entry failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to update entry" });
+  }
+});
+
+app.delete("/api/debts/:id/schedule/:sid", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const debtId = String(req.params.id || "");
+    const sid = String(req.params.sid || "");
+    if (!debtId || !sid) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const result = await dbPool.query(
+      "DELETE FROM debt_schedule WHERE id = $1 AND owner_id = $2 AND debt_id = $3",
+      [sid, owner.ownerId, debtId]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete schedule entry failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete entry" });
   }
 });
 
