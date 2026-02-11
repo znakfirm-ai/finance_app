@@ -1428,6 +1428,7 @@
 
 .debt-card-divider,
 .debt-summary-divider {
+  width: 100%;
   text-align: center;
   font-size: 12px;
   letter-spacing: 2px;
