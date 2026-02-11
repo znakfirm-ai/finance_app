@@ -417,6 +417,7 @@ function App() {
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyQueryDebounced, setHistoryQueryDebounced] = useState("");
   const [historyPeriod, setHistoryPeriod] = useState("month");
+  const debtHistoryPrevRef = useRef(null);
   const [customRange, setCustomRange] = useState({ from: "", to: "" });
   const [customRangeDraft, setCustomRangeDraft] = useState({ from: "", to: "" });
   const [showPeriodSheet, setShowPeriodSheet] = useState(false);
@@ -738,6 +739,18 @@ function App() {
     initData,
     webUserId,
   ]);
+
+  useEffect(() => {
+    if (debtDetail && debtHistoryPrevRef.current === null) {
+      debtHistoryPrevRef.current = historyPeriod;
+      setHistoryPeriod("all");
+      return;
+    }
+    if (!debtDetail && debtHistoryPrevRef.current !== null) {
+      setHistoryPeriod(debtHistoryPrevRef.current);
+      debtHistoryPrevRef.current = null;
+    }
+  }, [debtDetail, historyPeriod]);
 
   useEffect(() => {
     const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
