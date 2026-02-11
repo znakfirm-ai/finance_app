@@ -1991,7 +1991,7 @@ function App() {
 
     const mainOpPayload = {
       type: debt.kind === "owed_to_me" ? "income" : "expense",
-      amount,
+      amount: principalPart,
       account: debtPaymentAccount,
       label: `Платеж по долгу: ${debt.name}`,
       category: debt.kind === "owed_to_me" ? "Долги" : "Долги",
@@ -2003,13 +2003,15 @@ function App() {
     if (initData) mainOpPayload.initData = initData;
 
     try {
-      const opRes = await fetch(apiUrl(withWebQuery("/api/operations")), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify(mainOpPayload),
-      });
-      const opData = await opRes.json();
-      if (!opRes.ok) throw new Error(opData?.error || "Ошибка операции");
+      if (principalPart > 0) {
+        const opRes = await fetch(apiUrl(withWebQuery("/api/operations")), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify(mainOpPayload),
+        });
+        const opData = await opRes.json();
+        if (!opRes.ok) throw new Error(opData?.error || "Ошибка операции");
+      }
 
       if (interestPart > 0) {
         const interestPayload = {
@@ -2018,7 +2020,6 @@ function App() {
           account: debtPaymentAccount,
           label: `Проценты по долгу: ${debt.name}`,
           incomeSource: debtPaymentIncomeSource,
-          excludeFromSummary: true,
           sourceType: "debt_interest",
           sourceId: debt.id,
         };
