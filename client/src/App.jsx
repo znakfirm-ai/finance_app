@@ -2809,7 +2809,7 @@ function App() {
 
             <div className="row">
               <button
-                className={`btn ${goalTransfer?.type === "income" ? "active" : ""}`}
+                className={`btn ghost ${goalTransfer?.type === "income" ? "active" : ""}`}
                 onClick={() => {
                   setGoalTransfer({ goalId: goalDetail.id, type: "income" });
                   setGoalTransferAmount("");
