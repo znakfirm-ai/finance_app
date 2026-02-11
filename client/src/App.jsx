@@ -1911,8 +1911,16 @@ function App() {
         principalPart = manualPrincipal;
         interestPart = manualInterest;
       } else {
-        interestPart = Math.min(amount, interestRemaining);
+        const totalRemaining = interestRemaining + principalRemaining;
+        if (totalRemaining > 0) {
+          interestPart = roundMoney((amount * interestRemaining) / totalRemaining);
+          if (interestPart > interestRemaining) interestPart = interestRemaining;
+        }
         principalPart = roundMoney(amount - interestPart);
+        if (principalPart > principalRemaining) {
+          principalPart = principalRemaining;
+          interestPart = roundMoney(amount - principalPart);
+        }
       }
       if (interestPart > 0 && !debtPaymentIncomeSource) {
         setDebtPaymentError("Выберите источник дохода для процентов");
@@ -3807,6 +3815,19 @@ function App() {
                 </button>
               )}
             </div>
+            {debtScheduleEditor.mode === "edit" && !debtScheduleEditor.paid && (
+              <button
+                className="btn"
+                onClick={() =>
+                  openDebtPaymentConfirm(
+                    { ...debtScheduleEditor, debtId: debtScheduleEditor.debtId },
+                    debtDetail
+                  )
+                }
+              >
+                Принять платеж
+              </button>
+            )}
             {debtScheduleMessage && <div className="error">{debtScheduleMessage}</div>}
           </section>
         );
