@@ -3565,6 +3565,11 @@ function App() {
                   {formatMoney(debtDetail.nextPaymentAmount, debtCurrencySymbol)}
                 </div>
               )}
+              {debtDetail.dueDate && (
+                <div className="debt-summary-next">
+                  Дата возврата: {formatDisplayDate(debtDetail.dueDate)}
+                </div>
+              )}
               <div className="goal-progress">
                 <div
                   className="goal-progress-fill"
