@@ -903,8 +903,8 @@ function App() {
       setDebtTotal("");
       setDebtIssuedDate(defaultDate);
       setDebtDueDate(defaultDate);
-      setDebtRate("");
-      setDebtTermMonths("");
+    setDebtRate("");
+    setDebtTermMonths("");
       setDebtPaymentType("annuity");
       setDebtPaymentsCount("");
       setDebtScheduleEnabled(true);
@@ -3454,22 +3454,6 @@ function App() {
                   value={debtPrincipal}
                   onChange={(e) => setDebtPrincipal(e.target.value)}
                 />
-                <label className="label">Ставка, % годовых</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  value={debtRate}
-                  onChange={(e) => setDebtRate(e.target.value)}
-                />
-                <label className="label">Срок, мес.</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="1"
-                  value={debtTermMonths}
-                  onChange={(e) => setDebtTermMonths(e.target.value)}
-                />
                 <label className="label">Тип платежей</label>
                 <select
                   className="select"
@@ -3497,22 +3481,6 @@ function App() {
                   step="0.01"
                   value={debtTotal}
                   onChange={(e) => setDebtTotal(e.target.value)}
-                />
-                <label className="label">Процент</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  value={debtRate}
-                  onChange={(e) => setDebtRate(e.target.value)}
-                />
-                <label className="label">Срок, мес.</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="1"
-                  value={debtTermMonths}
-                  onChange={(e) => setDebtTermMonths(e.target.value)}
                 />
                 <label className="label">Дата возврата</label>
                 <DateSlotPicker
