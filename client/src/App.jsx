@@ -509,6 +509,42 @@ function App() {
     setDebtPaymentError("");
   };
 
+  const buildDebtScheduleSplits = (debt, scheduleItems) => {
+    if (!debt || !Array.isArray(scheduleItems) || scheduleItems.length === 0) return null;
+    const principalTotal = Math.max(0, Number(debt.principalAmount || 0));
+    const totalAmount = Math.max(0, Number(debt.totalAmount || 0));
+    const interestTotal = Math.max(0, totalAmount - principalTotal);
+    if (totalAmount <= 0 || principalTotal <= 0) return null;
+    const ordered = scheduleItems
+      .slice()
+      .sort((a, b) => {
+        const aDate = new Date(a.dueDate || a.createdAt || 0).getTime();
+        const bDate = new Date(b.dueDate || b.createdAt || 0).getTime();
+        return aDate - bDate;
+      });
+    const count = ordered.length;
+    if (!count) return null;
+    const basePrincipal = principalTotal / count;
+    const baseInterest = interestTotal / count;
+    let remainingPrincipal = principalTotal;
+    let remainingInterest = interestTotal;
+    const splits = new Map();
+    ordered.forEach((entry, idx) => {
+      let principalPart = idx === count - 1 ? remainingPrincipal : roundMoney(basePrincipal);
+      let interestPart = idx === count - 1 ? remainingInterest : roundMoney(baseInterest);
+      if (principalPart > remainingPrincipal) principalPart = remainingPrincipal;
+      if (interestPart > remainingInterest) interestPart = remainingInterest;
+      remainingPrincipal = roundMoney(remainingPrincipal - principalPart);
+      remainingInterest = roundMoney(remainingInterest - interestPart);
+      splits.set(entry.id, {
+        principal: principalPart,
+        interest: interestPart,
+        amount: Number(entry.amount || 0),
+      });
+    });
+    return splits;
+  };
+
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (tg) {
@@ -1874,13 +1910,33 @@ function App() {
       setDebtPaymentError("Сумма больше остатка платежа");
       return;
     }
-    const interestTotal = Math.max(0, Number(debt.totalAmount || 0) - Number(debt.principalAmount || 0));
+    const interestTotal = Math.max(
+      0,
+      Number(debt.totalAmount || 0) - Number(debt.principalAmount || 0)
+    );
     const paidTotal = Number(debt.paidTotal || 0);
     const interestPaid = Math.min(paidTotal, interestTotal);
     const interestRemaining = Math.max(0, interestTotal - interestPaid);
     const principalTotal = Math.max(0, Number(debt.principalAmount || 0));
     const principalPaid = Math.max(0, paidTotal - interestPaid);
     const principalRemaining = Math.max(0, principalTotal - principalPaid);
+    const scheduleSplits = buildDebtScheduleSplits(debt, debtScheduleItems);
+    const entrySplit = scheduleSplits?.get(entry.id);
+    const entryAmount = Number(entry.amount || 0);
+    const entryPaid = Number(entry.paidAmount || 0);
+    const entryRemainingAmount = Math.max(0, entryAmount - entryPaid);
+    const entryInterestRatio =
+      entrySplit && entryAmount > 0 ? entrySplit.interest / entryAmount : null;
+    const entryPrincipalRatio =
+      entrySplit && entryAmount > 0 ? entrySplit.principal / entryAmount : null;
+    const entryInterestRemaining =
+      entryInterestRatio !== null
+        ? roundMoney(entryRemainingAmount * entryInterestRatio)
+        : interestRemaining;
+    const entryPrincipalRemaining =
+      entryPrincipalRatio !== null
+        ? roundMoney(entryRemainingAmount * entryPrincipalRatio)
+        : principalRemaining;
     let principalPart = amount;
     let interestPart = 0;
     if (interestTotal > 0) {
@@ -1900,25 +1956,30 @@ function App() {
           setDebtPaymentError("Сумма тела и процентов не совпадает");
           return;
         }
-        if (manualInterest > interestRemaining) {
+        if (manualInterest > entryInterestRemaining) {
           setDebtPaymentError("Проценты больше остатка");
           return;
         }
-        if (manualPrincipal > principalRemaining) {
+        if (manualPrincipal > entryPrincipalRemaining) {
           setDebtPaymentError("Тело больше остатка");
           return;
         }
         principalPart = manualPrincipal;
         interestPart = manualInterest;
       } else {
-        const totalRemaining = interestRemaining + principalRemaining;
-        if (totalRemaining > 0) {
-          interestPart = roundMoney((amount * interestRemaining) / totalRemaining);
-          if (interestPart > interestRemaining) interestPart = interestRemaining;
+        if (entryInterestRatio !== null) {
+          interestPart = roundMoney(amount * entryInterestRatio);
+          if (interestPart > entryInterestRemaining) interestPart = entryInterestRemaining;
+        } else {
+          const totalRemaining = interestRemaining + principalRemaining;
+          if (totalRemaining > 0) {
+            interestPart = roundMoney((amount * interestRemaining) / totalRemaining);
+            if (interestPart > interestRemaining) interestPart = interestRemaining;
+          }
         }
         principalPart = roundMoney(amount - interestPart);
-        if (principalPart > principalRemaining) {
-          principalPart = principalRemaining;
+        if (principalPart > entryPrincipalRemaining) {
+          principalPart = entryPrincipalRemaining;
           interestPart = roundMoney(amount - principalPart);
         }
       }
