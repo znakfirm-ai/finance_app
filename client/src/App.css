@@ -557,6 +557,10 @@
   gap: 10px;
 }
 
+.overview-carousel.compact.goal-carousel {
+  grid-auto-columns: minmax(140px, 1fr);
+}
+
 .overview-carousel::-webkit-scrollbar {
   display: none;
 }
@@ -652,6 +656,7 @@
 .goal-amount {
   font-size: 10px;
   color: #475569;
+  white-space: nowrap;
 }
 
 .goal-deadline {

@@ -3531,7 +3531,7 @@ function App() {
               <div className="overview-section-header">
                 <div className="overview-subtitle">Цели</div>
               </div>
-              <div className="overview-carousel compact">
+              <div className="overview-carousel compact goal-carousel">
                 {goalTiles.map((goal) => (
                   <div
                     key={goal.id}
