@@ -2435,13 +2435,6 @@ function App() {
     }).format(date);
   };
 
-  const startOfDay = (value) => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return null;
-    date.setHours(0, 0, 0, 0);
-    return date;
-  };
-
   const getDebtAlertTone = (debt) => {
     if (!debt?.nextPaymentDate) return "";
     const today = startOfDay(new Date());
