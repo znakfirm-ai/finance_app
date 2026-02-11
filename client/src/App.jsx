@@ -1529,7 +1529,9 @@ function App() {
       return;
     }
     const isOwed = debtEditor?.kind === "owed_to_me";
-    if (isOwed && debtScheduleEnabled && (!debtIssuedDate || !debtDueDate)) {
+    const issuedDateValue = debtIssuedDate || formatDateInput(new Date());
+    const dueDateValue = debtDueDate || formatDateInput(new Date());
+    if (isOwed && debtScheduleEnabled && (!issuedDateValue || !dueDateValue)) {
       setDebtEditorMessage("Укажи дату выдачи и дату возврата");
       return;
     }
@@ -1543,8 +1545,8 @@ function App() {
       name,
       principalAmount,
       totalAmount,
-      issuedDate: debtIssuedDate || null,
-      dueDate: debtDueDate || null,
+      issuedDate: issuedDateValue || null,
+      dueDate: dueDateValue || null,
       rate: rate ?? null,
       termMonths: termMonths ?? null,
       paymentType: debtPaymentType,
@@ -1579,7 +1581,9 @@ function App() {
       return;
     }
     const isOwed = debtEditor?.kind === "owed_to_me";
-    if (isOwed && debtScheduleEnabled && (!debtIssuedDate || !debtDueDate)) {
+    const issuedDateValue = debtIssuedDate || formatDateInput(new Date());
+    const dueDateValue = debtDueDate || formatDateInput(new Date());
+    if (isOwed && debtScheduleEnabled && (!issuedDateValue || !dueDateValue)) {
       setDebtEditorMessage("Укажи дату выдачи и дату возврата");
       return;
     }
@@ -1593,8 +1597,8 @@ function App() {
       name,
       principalAmount,
       totalAmount,
-      issuedDate: debtIssuedDate || null,
-      dueDate: debtDueDate || null,
+      issuedDate: issuedDateValue || null,
+      dueDate: dueDateValue || null,
       rate: rate ?? null,
       termMonths: termMonths ?? null,
       paymentType: debtPaymentType,
