@@ -845,20 +845,21 @@ function App() {
     if (!debtEditor) return;
     setDebtEditorMessage("");
     if (debtEditor.mode === "create") {
+      const defaultDate = formatDateInput(new Date());
       setDebtName("");
-    setDebtPrincipal("");
-    setDebtTotal("");
-    setDebtIssuedDate("");
-    setDebtDueDate(formatDateInput(new Date()));
-    setDebtRate("");
-    setDebtTermMonths("");
-    setDebtPaymentType("annuity");
-    setDebtPaymentsCount("");
-    setDebtScheduleEnabled(true);
-    setDebtFrequency("monthly");
-    setDebtNotes("");
-    setDebtCurrencyCode(settings.currencyCode || "RUB");
-    return;
+      setDebtPrincipal("");
+      setDebtTotal("");
+      setDebtIssuedDate(defaultDate);
+      setDebtDueDate(defaultDate);
+      setDebtRate("");
+      setDebtTermMonths("");
+      setDebtPaymentType("annuity");
+      setDebtPaymentsCount("");
+      setDebtScheduleEnabled(true);
+      setDebtFrequency("monthly");
+      setDebtNotes("");
+      setDebtCurrencyCode(settings.currencyCode || "RUB");
+      return;
     }
     setDebtName(debtEditor.name || "");
     setDebtPrincipal(
@@ -871,8 +872,13 @@ function App() {
         ? String(debtEditor.totalAmount)
         : ""
     );
-    setDebtIssuedDate(debtEditor.issuedDate ? formatDateInput(debtEditor.issuedDate) : "");
-    setDebtDueDate(debtEditor.dueDate ? formatDateInput(debtEditor.dueDate) : "");
+    const fallbackDate = formatDateInput(new Date());
+    setDebtIssuedDate(
+      debtEditor.issuedDate ? formatDateInput(debtEditor.issuedDate) : fallbackDate
+    );
+    setDebtDueDate(
+      debtEditor.dueDate ? formatDateInput(debtEditor.dueDate) : fallbackDate
+    );
     setDebtRate(
       debtEditor.rate !== null && debtEditor.rate !== undefined ? String(debtEditor.rate) : ""
     );
