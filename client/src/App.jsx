@@ -1997,7 +1997,7 @@ function App() {
       amount: principalPart,
       account: debtPaymentAccount,
       label: `Платеж по долгу: ${debt.name}`,
-      category: debt.kind === "owed_to_me" ? "Долги" : "Долги",
+      category: "Долги",
       forceIncomeSourceNull: true,
       sourceType: "debt_payment",
       sourceId: debt.id,

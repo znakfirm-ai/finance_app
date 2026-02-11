@@ -534,10 +534,7 @@ async function listOperations({
   }
   if (incomeSource) {
     params.push(incomeSource);
-    params.push(incomeSource);
-    where.push(
-      `(income_source = $${params.length - 1} OR (income_source IS NULL AND category = $${params.length}))`
-    );
+    where.push(`income_source = $${params.length}`);
   }
   if (category) {
     params.push(category);
