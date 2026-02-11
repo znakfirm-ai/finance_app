@@ -3555,10 +3555,6 @@ function App() {
               <div className="debt-summary-amount">
                 {formatMoney(debtDetail.remaining, debtCurrencySymbol)}
               </div>
-              <div className="debt-summary-sub">
-                Возвращено {formatMoney(debtDetail.paidTotal, debtCurrencySymbol)} из{" "}
-                {formatMoney(debtDetail.totalAmount, debtCurrencySymbol)}
-              </div>
               {debtDetail.nextPaymentDate && debtDetail.nextPaymentAmount !== null && (
                 <div className="debt-summary-next">
                   Следующий платеж: {formatDisplayDate(debtDetail.nextPaymentDate)} —{" "}
@@ -3585,6 +3581,10 @@ function App() {
                     background: "#0f172a",
                   }}
                 />
+              </div>
+              <div className="debt-summary-sub">
+                Возвращено {formatMoney(debtDetail.paidTotal, debtCurrencySymbol)} из{" "}
+                {formatMoney(debtDetail.totalAmount, debtCurrencySymbol)}
               </div>
             </div>
             <div className="row">
