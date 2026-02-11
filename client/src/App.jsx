@@ -401,8 +401,10 @@ function App() {
   const [debtPaymentType, setDebtPaymentType] = useState("annuity");
   const [debtPaymentsCount, setDebtPaymentsCount] = useState("");
   const [debtScheduleEnabled, setDebtScheduleEnabled] = useState(true);
+  const [debtFirstPaymentDate, setDebtFirstPaymentDate] = useState("");
   const [debtFrequency, setDebtFrequency] = useState("monthly");
   const [debtNotes, setDebtNotes] = useState("");
+  const [debtCurrencyCode, setDebtCurrencyCode] = useState("RUB");
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
   const [goalTransferAccount, setGoalTransferAccount] = useState("");
@@ -851,12 +853,14 @@ function App() {
       setDebtDueDate("");
       setDebtRate("");
       setDebtTermMonths("");
-      setDebtPaymentType("annuity");
-      setDebtPaymentsCount("");
-      setDebtScheduleEnabled(true);
-      setDebtFrequency("monthly");
-      setDebtNotes("");
-      return;
+    setDebtPaymentType("annuity");
+    setDebtPaymentsCount("");
+    setDebtScheduleEnabled(true);
+    setDebtFirstPaymentDate(formatDateInput(new Date()));
+    setDebtFrequency("monthly");
+    setDebtNotes("");
+    setDebtCurrencyCode(settings.currencyCode || "RUB");
+    return;
     }
     setDebtName(debtEditor.name || "");
     setDebtPrincipal(
@@ -886,8 +890,12 @@ function App() {
         : ""
     );
     setDebtScheduleEnabled(debtEditor.scheduleEnabled !== false);
+    setDebtFirstPaymentDate(
+      debtEditor.firstPaymentDate ? formatDateInput(debtEditor.firstPaymentDate) : ""
+    );
     setDebtFrequency(debtEditor.frequency || "monthly");
     setDebtNotes(debtEditor.notes || "");
+    setDebtCurrencyCode(debtEditor.currencyCode || settings.currencyCode || "RUB");
   }, [debtEditor?.id, debtEditor?.mode, debtEditor?.name]);
 
   useEffect(() => {
@@ -930,11 +938,25 @@ function App() {
     return entry?.symbol || settings.currencySymbol || "₽";
   };
 
-  const startOfDay = (date) =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  const normalizeDate = (value) => {
+    const date = value instanceof Date ? new Date(value) : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
+  };
 
-  const endOfDay = (date) =>
-    new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  const startOfDay = (value) => {
+    const date = normalizeDate(value);
+    if (!date) return null;
+    date.setHours(0, 0, 0, 0);
+    return date;
+  };
+
+  const endOfDay = (value) => {
+    const date = normalizeDate(value);
+    if (!date) return null;
+    date.setHours(23, 59, 59, 999);
+    return date;
+  };
 
   const getPeriodRange = () => {
     if (historyPeriod === "all") return null;
@@ -1522,8 +1544,10 @@ function App() {
       paymentType: debtPaymentType,
       paymentsCount: paymentsCount ?? null,
       scheduleEnabled: debtScheduleEnabled,
+      firstPaymentDate: debtFirstPaymentDate || null,
       frequency: debtFrequency,
       notes: debtNotes || "",
+      currencyCode: debtCurrencyCode || null,
     };
     if (webUserId) payload.webUserId = webUserId;
     if (initData) payload.initData = initData;
@@ -1566,8 +1590,10 @@ function App() {
       paymentType: debtPaymentType,
       paymentsCount: paymentsCount ?? null,
       scheduleEnabled: debtScheduleEnabled,
+      firstPaymentDate: debtFirstPaymentDate || null,
       frequency: debtFrequency,
       notes: debtNotes || "",
+      currencyCode: debtCurrencyCode || null,
     };
     if (webUserId) payload.webUserId = webUserId;
     if (initData) payload.initData = initData;
@@ -3273,6 +3299,12 @@ function App() {
               onChange={(e) => setDebtName(e.target.value)}
               placeholder="Например: Альфа Банк"
             />
+            <label className="label">Дата выдачи</label>
+            <DateSlotPicker
+              value={debtIssuedDate || formatDateInput(new Date())}
+              ariaLabel="Дата выдачи"
+              onChange={(value) => setDebtIssuedDate(value)}
+            />
             {debtEditor.kind === "credit" ? (
               <>
                 <label className="label">Сумма кредита</label>
@@ -3335,6 +3367,14 @@ function App() {
                   value={debtRate}
                   onChange={(e) => setDebtRate(e.target.value)}
                 />
+                <label className="label">Срок, мес.</label>
+                <input
+                  className="input"
+                  type="number"
+                  step="1"
+                  value={debtTermMonths}
+                  onChange={(e) => setDebtTermMonths(e.target.value)}
+                />
                 <label className="label">График платежей</label>
                 <label className="toggle">
                   <input
@@ -3346,6 +3386,12 @@ function App() {
                 </label>
                 {debtScheduleEnabled && (
                   <>
+                    <label className="label">Дата первого платежа</label>
+                    <DateSlotPicker
+                      value={debtFirstPaymentDate || formatDateInput(new Date())}
+                      ariaLabel="Дата первого платежа"
+                      onChange={(value) => setDebtFirstPaymentDate(value)}
+                    />
                     <label className="label">Кол-во платежей</label>
                     <input
                       className="input"
@@ -3360,6 +3406,7 @@ function App() {
                       value={debtFrequency}
                       onChange={(e) => setDebtFrequency(e.target.value)}
                     >
+                      <option value="daily">Каждый день</option>
                       <option value="monthly">Каждый месяц</option>
                       <option value="weekly">Каждую неделю</option>
                       <option value="quarterly">Каждый квартал</option>
@@ -3368,6 +3415,18 @@ function App() {
                 )}
               </>
             )}
+            <label className="label">Валюта</label>
+            <select
+              className="select"
+              value={debtCurrencyCode}
+              onChange={(e) => setDebtCurrencyCode(e.target.value)}
+            >
+              {currencyOptions.map((opt) => (
+                <option key={opt.code} value={opt.code}>
+                  {opt.code} {opt.symbol}
+                </option>
+              ))}
+            </select>
             <label className="label">Примечание</label>
             <input
               className="input"
@@ -3461,6 +3520,7 @@ function App() {
       if (debtDetail) {
         const sign = debtDetail.kind === "owed_to_me" ? 1 : -1;
         const debtAlertTone = getDebtAlertTone(debtDetail);
+        const debtCurrencySymbol = currencySymbolByCode(debtDetail.currencyCode);
         return (
           <section className="overview-shell">
             <div className="overview-manage-header">
@@ -3475,16 +3535,16 @@ function App() {
               }`}
             >
               <div className="debt-summary-amount">
-                {formatMoney(debtDetail.remaining)}
+                {formatMoney(debtDetail.remaining, debtCurrencySymbol)}
               </div>
               <div className="debt-summary-sub">
-                Возвращено {formatMoney(debtDetail.paidTotal)} из{" "}
-                {formatMoney(debtDetail.totalAmount)}
+                Возвращено {formatMoney(debtDetail.paidTotal, debtCurrencySymbol)} из{" "}
+                {formatMoney(debtDetail.totalAmount, debtCurrencySymbol)}
               </div>
               {debtDetail.nextPaymentDate && debtDetail.nextPaymentAmount !== null && (
                 <div className="debt-summary-next">
                   Следующий платеж: {formatDisplayDate(debtDetail.nextPaymentDate)} —{" "}
-                  {formatMoney(debtDetail.nextPaymentAmount)}
+                  {formatMoney(debtDetail.nextPaymentAmount, debtCurrencySymbol)}
                 </div>
               )}
               <div className="goal-progress">
@@ -3589,7 +3649,11 @@ function App() {
                               sign > 0 ? "income" : "expense"
                             }`}
                           >
-                            {formatSignedMoney(entry.amount, sign > 0 ? "income" : "expense", settings.currencySymbol)}
+                            {formatSignedMoney(
+                              entry.amount,
+                              sign > 0 ? "income" : "expense",
+                              debtCurrencySymbol
+                            )}
                           </span>
                         </div>
                       ))}
@@ -3611,10 +3675,14 @@ function App() {
                   rate: debtDetail.rate,
                   termMonths: debtDetail.termMonths,
                   paymentType: debtDetail.paymentType,
+                  paymentsCount: debtDetail.paymentsCount,
+                  frequency: debtDetail.frequency,
                   issuedDate: debtDetail.issuedDate,
                   dueDate: debtDetail.dueDate,
                   notes: debtDetail.notes || "",
                   scheduleEnabled: debtDetail.scheduleEnabled,
+                  currencyCode: debtDetail.currencyCode,
+                  firstPaymentDate: debtDetail.firstPaymentDate || debtDetail.nextPaymentDate,
                 })
               }
             >
@@ -3657,6 +3725,7 @@ function App() {
                   const debtAlertTone = getDebtAlertTone(item);
                   const progress =
                     item.totalAmount > 0 ? item.paidTotal / item.totalAmount : 0;
+                  const debtCurrencySymbol = currencySymbolByCode(item.currencyCode);
                   return (
                     <button
                       key={item.id}
@@ -3673,7 +3742,7 @@ function App() {
                       <div className="debt-card-top">
                         <span className="debt-card-name">{item.name}</span>
                         <span className="debt-card-amount">
-                          {formatMoney(item.remaining)}
+                          {formatMoney(item.remaining, debtCurrencySymbol)}
                         </span>
                       </div>
                       <div className="debt-card-meta">
@@ -3683,7 +3752,7 @@ function App() {
                           : "—"}
                         {item.nextPaymentAmount !== null &&
                         item.nextPaymentAmount !== undefined
-                          ? ` · ${formatMoney(item.nextPaymentAmount)}`
+                          ? ` · ${formatMoney(item.nextPaymentAmount, debtCurrencySymbol)}`
                           : ""}
                       </div>
                       <div className="goal-progress">

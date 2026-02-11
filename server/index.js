@@ -351,6 +351,9 @@ async function initDb() {
       principal_amount numeric(12,2) NOT NULL DEFAULT 0,
       total_amount numeric(12,2) NOT NULL DEFAULT 0,
       schedule_enabled boolean NOT NULL DEFAULT true,
+      payments_count integer,
+      frequency text,
+      first_payment_date date,
       currency_code text,
       issued_date date,
       due_date date,
@@ -364,6 +367,13 @@ async function initDb() {
   `);
   await dbPool.query(
     "ALTER TABLE debts ADD COLUMN IF NOT EXISTS schedule_enabled boolean NOT NULL DEFAULT true;"
+  );
+  await dbPool.query(
+    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS payments_count integer;"
+  );
+  await dbPool.query("ALTER TABLE debts ADD COLUMN IF NOT EXISTS frequency text;");
+  await dbPool.query(
+    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS first_payment_date date;"
   );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS debts_owner_id_idx ON debts(owner_id);"
@@ -959,7 +969,9 @@ function generateEqualSchedule({
   for (let i = 0; i < count; i += 1) {
     const amount = i === count - 1 ? roundMoney(base + remainder) : base;
     let dueDate;
-    if (frequency === "weekly") {
+    if (frequency === "daily") {
+      dueDate = addDays(firstPaymentDate, i);
+    } else if (frequency === "weekly") {
       dueDate = addDays(firstPaymentDate, i * 7);
     } else if (frequency === "quarterly") {
       dueDate = addMonths(firstPaymentDate, i * 3);
@@ -1440,7 +1452,8 @@ async function listDebtsForOwner(ownerId, kind) {
   const params = [ownerId, kind];
   const { rows } = await dbPool.query(
     `SELECT id, name, kind, principal_amount, total_amount, currency_code, issued_date, due_date,
-            rate, term_months, payment_type, notes, schedule_enabled, created_at, updated_at
+            rate, term_months, payment_type, notes, schedule_enabled, payments_count, frequency,
+            first_payment_date, created_at, updated_at
      FROM debts
      WHERE owner_id = $1 AND kind = $2
      ORDER BY created_at DESC`,
@@ -1498,6 +1511,14 @@ async function listDebtsForOwner(ownerId, kind) {
       paymentType: row.payment_type || null,
       notes: row.notes || "",
       scheduleEnabled: row.schedule_enabled !== false,
+      paymentsCount:
+        row.payments_count !== null && row.payments_count !== undefined
+          ? Number(row.payments_count)
+          : null,
+      frequency: row.frequency || null,
+      firstPaymentDate: row.first_payment_date
+        ? new Date(row.first_payment_date).toISOString()
+        : null,
       createdAt: row.created_at ? row.created_at.toISOString() : null,
       nextPaymentDate: nextPayment?.due_date ? new Date(nextPayment.due_date).toISOString() : null,
       nextPaymentAmount:
@@ -4376,7 +4397,7 @@ app.post("/api/debts", async (req, res) => {
         totalAmount: baseAmount,
         paymentsCount: Number.isFinite(paymentsCount) ? paymentsCount : termMonths || 1,
         firstPaymentDate: scheduleBaseDate,
-        frequency: ["weekly", "monthly", "quarterly"].includes(frequency)
+        frequency: ["daily", "weekly", "monthly", "quarterly"].includes(frequency)
           ? frequency
           : "monthly",
       });
@@ -4386,8 +4407,9 @@ app.post("/api/debts", async (req, res) => {
       await client.query("BEGIN");
       await client.query(
         `INSERT INTO debts (id, owner_id, kind, name, principal_amount, total_amount, currency_code,
-                            schedule_enabled, issued_date, due_date, rate, term_months, payment_type, notes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+                            schedule_enabled, payments_count, frequency, first_payment_date,
+                            issued_date, due_date, rate, term_months, payment_type, notes)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [
           id,
           owner.ownerId,
@@ -4397,6 +4419,11 @@ app.post("/api/debts", async (req, res) => {
           totalAmount || principalAmount,
           currencyCode,
           scheduleEnabled,
+          Number.isFinite(paymentsCount) ? paymentsCount : null,
+          frequency || null,
+          firstPaymentDate && !Number.isNaN(firstPaymentDate.getTime())
+            ? firstPaymentDate.toISOString()
+            : null,
           issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate.toISOString() : null,
           dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
           Number.isFinite(rate) ? rate : null,
@@ -4469,6 +4496,11 @@ app.put("/api/debts/:id", async (req, res) => {
     const paymentType = String(req.body?.paymentType || "").trim().toLowerCase();
     const notes = String(req.body?.notes || "").trim();
     const scheduleEnabled = req.body?.scheduleEnabled !== false;
+    const paymentsCount = Number(req.body?.paymentsCount);
+    const frequency = String(req.body?.frequency || "").trim().toLowerCase();
+    const firstPaymentDate = req.body?.firstPaymentDate
+      ? new Date(req.body.firstPaymentDate)
+      : null;
     if (!dbPool) return res.status(400).json({ error: "Database unavailable" });
     const result = await dbPool.query(
       `UPDATE debts
@@ -4478,14 +4510,17 @@ app.put("/api/debts/:id", async (req, res) => {
            total_amount = $4,
            currency_code = $5,
            schedule_enabled = $6,
-           issued_date = $7,
-           due_date = $8,
-           rate = $9,
-           term_months = $10,
-           payment_type = $11,
-           notes = $12,
+           payments_count = $7,
+           frequency = $8,
+           first_payment_date = $9,
+           issued_date = $10,
+           due_date = $11,
+           rate = $12,
+           term_months = $13,
+           payment_type = $14,
+           notes = $15,
            updated_at = now()
-       WHERE id = $13 AND owner_id = $14`,
+       WHERE id = $16 AND owner_id = $17`,
       [
         name,
         kind,
@@ -4493,6 +4528,11 @@ app.put("/api/debts/:id", async (req, res) => {
         totalAmount || principalAmount,
         currencyCode,
         scheduleEnabled,
+        Number.isFinite(paymentsCount) ? paymentsCount : null,
+        frequency || null,
+        firstPaymentDate && !Number.isNaN(firstPaymentDate.getTime())
+          ? firstPaymentDate.toISOString()
+          : null,
         issuedDate && !Number.isNaN(issuedDate.getTime()) ? issuedDate.toISOString() : null,
         dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
         Number.isFinite(rate) ? rate : null,
