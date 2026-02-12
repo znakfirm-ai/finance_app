@@ -162,15 +162,6 @@
   color: #b91c1c;
   font-size: 14px;
 }
-.warning {
-  color: #92400e;
-  background: rgba(251, 191, 36, 0.15);
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: 13px;
-  margin-top: 10px;
-}
 
 .list {
   list-style: none;
@@ -1437,10 +1428,11 @@
 
 .debt-card-divider,
 .debt-summary-divider {
-  width: 100%;
-  border-top: 1px dashed #cbd5e1;
-  height: 0;
-  margin: 6px 0;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #cbd5e1;
+  line-height: 1;
 }
 
 .history-amount {

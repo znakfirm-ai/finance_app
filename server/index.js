@@ -392,22 +392,10 @@ async function initDb() {
       paid boolean NOT NULL DEFAULT false,
       paid_amount numeric(12,2),
       paid_at timestamptz,
-      principal_paid numeric(12,2),
-      interest_paid numeric(12,2),
-      paid_account text,
       note text,
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
-  await dbPool.query(
-    "ALTER TABLE debt_schedule ADD COLUMN IF NOT EXISTS principal_paid numeric(12,2);"
-  );
-  await dbPool.query(
-    "ALTER TABLE debt_schedule ADD COLUMN IF NOT EXISTS interest_paid numeric(12,2);"
-  );
-  await dbPool.query(
-    "ALTER TABLE debt_schedule ADD COLUMN IF NOT EXISTS paid_account text;"
-  );
   await dbPool.query(
     "CREATE INDEX IF NOT EXISTS debt_schedule_owner_id_idx ON debt_schedule(owner_id);"
   );
@@ -488,7 +476,7 @@ async function listOperations({
       data = data.filter((op) => op.type === type);
     }
     if (incomeSource) {
-      data = data.filter((op) => op.incomeSource === incomeSource);
+      data = data.filter((op) => (op.incomeSource || op.category) === incomeSource);
     }
     if (category) {
       data = data.filter((op) => op.category === category);
@@ -546,7 +534,10 @@ async function listOperations({
   }
   if (incomeSource) {
     params.push(incomeSource);
-    where.push(`income_source = $${params.length}`);
+    params.push(incomeSource);
+    where.push(
+      `(income_source = $${params.length - 1} OR (income_source IS NULL AND category = $${params.length}))`
+    );
   }
   if (category) {
     params.push(category);
@@ -1528,7 +1519,7 @@ async function listDebtsForOwner(ownerId, kind) {
   if (!rows.length) return [];
   const ids = rows.map((row) => row.id);
   const { rows: scheduleRows } = await dbPool.query(
-    `SELECT debt_id, amount, paid, paid_amount, due_date, interest_paid
+    `SELECT debt_id, amount, paid, paid_amount, due_date
      FROM debt_schedule
      WHERE owner_id = $1 AND debt_id = ANY($2::text[])`,
     [ownerId, ids]
@@ -1547,19 +1538,11 @@ async function listDebtsForOwner(ownerId, kind) {
         ? Number(row.total_amount)
         : schedule.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const paidTotal = schedule.reduce((sum, item) => {
-      if (item.paid_amount !== null && item.paid_amount !== undefined) {
-        return sum + Number(item.paid_amount);
-      }
-      if (item.paid) {
-        return sum + Number(item.amount || 0);
-      }
-      return sum;
-    }, 0);
-    const interestEarned = schedule.reduce((sum, item) => {
+      if (!item.paid) return sum;
       const value =
-        item.interest_paid !== null && item.interest_paid !== undefined
-          ? Number(item.interest_paid)
-          : 0;
+        item.paid_amount !== null && item.paid_amount !== undefined
+          ? Number(item.paid_amount)
+          : Number(item.amount || 0);
       return sum + value;
     }, 0);
     const remaining = Math.max(0, plannedTotal - paidTotal);
@@ -1576,7 +1559,6 @@ async function listDebtsForOwner(ownerId, kind) {
           : 0,
       totalAmount: plannedTotal,
       paidTotal,
-      interestEarned: row.kind === "owed_to_me" ? interestEarned : 0,
       remaining,
       currencyCode: row.currency_code || null,
       issuedDate: row.issued_date ? new Date(row.issued_date).toISOString() : null,
@@ -1615,8 +1597,7 @@ async function listDebtSchedule({
 } = {}) {
   if (!ownerId || !debtId || !dbPool) return [];
   let query = `
-    SELECT id, due_date, amount, paid, paid_amount, paid_at, note, created_at,
-           principal_paid, interest_paid, paid_account
+    SELECT id, due_date, amount, paid, paid_amount, paid_at, note, created_at
     FROM debt_schedule
     WHERE owner_id = $1 AND debt_id = $2
   `;
@@ -1651,15 +1632,6 @@ async function listDebtSchedule({
       row.paid_amount !== null && row.paid_amount !== undefined
         ? Number(row.paid_amount)
         : null,
-    principalPaid:
-      row.principal_paid !== null && row.principal_paid !== undefined
-        ? Number(row.principal_paid)
-        : null,
-    interestPaid:
-      row.interest_paid !== null && row.interest_paid !== undefined
-        ? Number(row.interest_paid)
-        : null,
-    paidAccount: row.paid_account || null,
     paidAt: row.paid_at ? row.paid_at.toISOString() : null,
     note: row.note || "",
     createdAt: row.created_at ? row.created_at.toISOString() : null,
@@ -2473,20 +2445,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 });
 
 app.post("/api/operations", async (req, res) => {
-  const {
-    text,
-    category,
-    account,
-    type,
-    amount,
-    label,
-    incomeSource,
-    date,
-    excludeFromSummary,
-    sourceType,
-    sourceId,
-    forceIncomeSourceNull,
-  } = req.body || {};
+  const { text, category, account, type, amount, label, incomeSource, date } = req.body || {};
   const owner = getOwnerFromRequest(req);
   if (owner?.error) {
     return res.status(401).json({ error: "Invalid Telegram data" });
@@ -2521,21 +2480,21 @@ app.post("/api/operations", async (req, res) => {
     const incomeMatch = incomeNames.find(
       (name) => String(name).toLowerCase() === String(pickIncomeSourceName()).toLowerCase()
     );
-    const shouldForceIncomeSourceNull =
-      forceIncomeSourceNull === true || forceIncomeSourceNull === "true";
     const resolvedIncomeSource =
       typeValue === "income"
-        ? shouldForceIncomeSourceNull
-          ? null
-          : incomeMatch ||
-            incomeNames.find((name) => String(name).toLowerCase().includes("проч")) ||
-            incomeNames[0] ||
-            "Прочее"
+        ? incomeMatch ||
+          incomeNames.find((name) =>
+            String(name).toLowerCase().includes("проч")
+          ) ||
+          incomeNames[0] ||
+          "Прочее"
         : null;
     const resolvedCategory =
       typeValue === "income"
-        ? category || resolvedIncomeSource || "Прочее"
-        : category || categoriesList.find((c) => c.name)?.name || "Другое";
+        ? resolvedIncomeSource || "Прочее"
+        : category ||
+          categoriesList.find((c) => c.name)?.name ||
+          "Другое";
     const opLabel =
       String(label || "").trim() ||
       (typeValue === "income" ? resolvedIncomeSource : resolvedCategory) ||
@@ -2564,9 +2523,6 @@ app.post("/api/operations", async (req, res) => {
       account: accountName,
       accountSpecified: Boolean(accountMatch),
       incomeSource: resolvedIncomeSource,
-      excludeFromSummary: excludeFromSummary === true,
-      sourceType: sourceType || null,
-      sourceId: sourceId || null,
       createdAt: createdAt.toISOString(),
       telegramUserId: owner.ownerId,
     };
@@ -4445,59 +4401,6 @@ app.get("/api/debts", async (req, res) => {
   }
 });
 
-app.get("/api/debts/interest", async (req, res) => {
-  try {
-    const owner = getOwnerFromRequest(req);
-    if (owner?.error) {
-      return res.status(401).json({ error: "Invalid Telegram data" });
-    }
-    if (!owner?.ownerId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    if (!dbPool) return res.json([]);
-    const limit = Math.min(Number(req.query?.limit || 200), 500);
-    const q = String(req.query?.q || "").trim().toLowerCase();
-    const from = req.query?.from ? new Date(req.query.from) : null;
-    const to = req.query?.to ? new Date(req.query.to) : null;
-    let query = `
-      SELECT ds.id, ds.debt_id, ds.interest_paid, ds.paid_at, ds.created_at, ds.paid_account, d.name
-      FROM debt_schedule ds
-      JOIN debts d ON ds.debt_id = d.id
-      WHERE ds.owner_id = $1 AND d.kind = 'owed_to_me' AND ds.interest_paid > 0
-    `;
-    const params = [owner.ownerId];
-    if (q) {
-      params.push(`%${q}%`);
-      query += ` AND (LOWER(d.name) LIKE $${params.length} OR CAST(ds.interest_paid AS text) LIKE $${params.length})`;
-    }
-    if (from && !Number.isNaN(from.getTime())) {
-      params.push(from.toISOString());
-      query += ` AND COALESCE(ds.paid_at, ds.created_at) >= $${params.length}`;
-    }
-    if (to && !Number.isNaN(to.getTime())) {
-      params.push(to.toISOString());
-      query += ` AND COALESCE(ds.paid_at, ds.created_at) <= $${params.length}`;
-    }
-    params.push(limit);
-    query += ` ORDER BY COALESCE(ds.paid_at, ds.created_at) DESC LIMIT $${params.length}`;
-    const { rows } = await dbPool.query(query, params);
-    const items = rows.map((row) => ({
-      id: `interest_${row.id}`,
-      debtId: row.debt_id,
-      type: "income",
-      amount: Number(row.interest_paid),
-      label: `Проценты по долгу: ${row.name}`,
-      account: row.paid_account || "",
-      incomeSource: "Проценты по займам",
-      createdAt: row.paid_at || row.created_at,
-    }));
-    res.json(items);
-  } catch (err) {
-    console.error("Load debt interest failed:", err?.message || err);
-    res.status(500).json({ error: "Failed to load debt interest" });
-  }
-});
-
 app.post("/api/debts", async (req, res) => {
   try {
     const owner = getOwnerFromRequest(req);
@@ -5048,11 +4951,6 @@ app.put("/api/debts/:id/schedule/:sid", async (req, res) => {
     const note = String(req.body?.note || "").trim();
     const paid = req.body?.paid === true || req.body?.paid === "true";
     const paidAmount = req.body?.paidAmount !== undefined ? roundMoney(req.body.paidAmount) : null;
-    const principalPaid =
-      req.body?.principalPaid !== undefined ? roundMoney(req.body.principalPaid) : null;
-    const interestPaid =
-      req.body?.interestPaid !== undefined ? roundMoney(req.body.interestPaid) : null;
-    const paidAccount = req.body?.paidAccount ? String(req.body.paidAccount) : null;
     const result = await dbPool.query(
       `UPDATE debt_schedule
        SET due_date = $1,
@@ -5060,11 +4958,8 @@ app.put("/api/debts/:id/schedule/:sid", async (req, res) => {
            note = $3,
            paid = $4,
            paid_amount = $5,
-           paid_at = $6,
-           principal_paid = $7,
-           interest_paid = $8,
-           paid_account = $9
-       WHERE id = $10 AND owner_id = $11 AND debt_id = $12`,
+           paid_at = $6
+       WHERE id = $7 AND owner_id = $8 AND debt_id = $9`,
       [
         dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
         amount,
@@ -5072,9 +4967,6 @@ app.put("/api/debts/:id/schedule/:sid", async (req, res) => {
         paid,
         paidAmount,
         paid ? new Date().toISOString() : null,
-        principalPaid,
-        interestPaid,
-        paidAccount,
         sid,
         owner.ownerId,
         debtId,
