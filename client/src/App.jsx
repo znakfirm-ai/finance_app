@@ -10,22 +10,6 @@ const normalizeApiBase = (value) => {
 };
 
 const RAW_API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
-const getStoredWebUserId = () => {
-  if (typeof window === "undefined") return null;
-  try {
-    const storageKey = "finance_web_user_id";
-    let id = localStorage.getItem(storageKey);
-    if (!id) {
-      id =
-        (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
-        `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      localStorage.setItem(storageKey, id);
-    }
-    return id;
-  } catch (_) {
-    return null;
-  }
-};
 const API_BASE = RAW_API_BASE;
 const isVercelHost = () => {
   if (typeof window === "undefined") return false;
@@ -354,10 +338,6 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState(null);
-  const [sessionUserId] = useState(
-    () => `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  );
-  const [webUserId, setWebUserId] = useState(() => getStoredWebUserId() || sessionUserId);
   const [telegramReady, setTelegramReady] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryEditor, setCategoryEditor] = useState(null);
@@ -426,44 +406,29 @@ function App() {
     if (tg) {
       tg.ready();
       if (tg.initData) setInitData(tg.initData);
-      const tgUserId = tg.initDataUnsafe?.user?.id;
-      if (tgUserId) {
-        setWebUserId(String(tgUserId));
-        setTelegramReady(true);
-        return;
-      }
-      const fallbackId = getStoredWebUserId() || sessionUserId;
-      if (fallbackId) setWebUserId(fallbackId);
       setTelegramReady(true);
       return;
-    }
-    if (!tg) {
-      const fallbackId = getStoredWebUserId() || sessionUserId;
-      if (fallbackId) setWebUserId(fallbackId);
     }
     setTelegramReady(true);
   }, []);
 
-  const resolvedWebUserId = useMemo(() => {
-    return webUserId || getStoredWebUserId() || sessionUserId;
-  }, [webUserId, sessionUserId]);
-
-  useEffect(() => {
-    if (!webUserId && resolvedWebUserId) {
-      setWebUserId(resolvedWebUserId);
-    }
-  }, [webUserId, resolvedWebUserId]);
-
   const authHeaders = useMemo(() => {
     const headers = {};
     if (initData) headers["x-telegram-init-data"] = initData;
-    if (resolvedWebUserId) headers["x-web-user-id"] = resolvedWebUserId;
     return headers;
-  }, [initData, resolvedWebUserId]);
+  }, [initData]);
+
+  const withAuth = (options = {}) => ({
+    credentials: "include",
+    ...options,
+    headers: {
+      ...authHeaders,
+      ...(options.headers || {}),
+    },
+  });
 
   function withWebQuery(path) {
     const params = new URLSearchParams();
-    if (resolvedWebUserId) params.set("webUserId", resolvedWebUserId);
     if (initData) params.set("initData", initData);
     const query = params.toString();
     if (!query) return path;
@@ -473,9 +438,7 @@ function App() {
 
   async function loadMeta() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/meta")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/meta")), withAuth());
       const data = await res.json();
       setCurrencyOptions(Array.isArray(data?.currencyOptions) ? data.currencyOptions : []);
     } catch (_) {}
@@ -483,7 +446,7 @@ function App() {
 
   const handleUnauthorized = (res) => {
     if (res.status === 401) {
-      setError("Не удалось определить пользователя");
+      setError("Открой мини‑приложение из Telegram");
       return true;
     }
     return false;
@@ -491,9 +454,7 @@ function App() {
 
   async function loadAccounts() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/accounts")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/accounts")), withAuth());
       if (handleUnauthorized(res)) return;
       const data = await res.json();
       setAccounts(Array.isArray(data) ? data : []);
@@ -502,9 +463,7 @@ function App() {
 
   async function loadIncomeSources() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/income-sources")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/income-sources")), withAuth());
       if (handleUnauthorized(res)) return;
       const data = await res.json();
       setIncomeSources(Array.isArray(data) ? data : []);
@@ -513,9 +472,7 @@ function App() {
 
   async function loadCategories() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/categories")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/categories")), withAuth());
       if (handleUnauthorized(res)) return;
       const data = await res.json();
       setCategories(Array.isArray(data) ? data : []);
@@ -524,9 +481,7 @@ function App() {
 
   async function loadGoals() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/goals")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/goals")), withAuth());
       if (handleUnauthorized(res)) return;
       const data = await res.json();
       setGoals(Array.isArray(data) ? data : []);
@@ -535,9 +490,7 @@ function App() {
 
   async function loadOperations() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/operations")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/operations")), withAuth());
       if (handleUnauthorized(res)) return;
       const data = await res.json();
       setOperations(Array.isArray(data) ? data : []);
@@ -578,7 +531,7 @@ function App() {
         ? `/api/goals/${goalDetail.id}/transactions?${params}`
         : `/api/operations?${params}`;
       const res = await fetch(apiUrl(withWebQuery(endpoint)), {
-        headers: authHeaders,
+        ...withAuth(),
       });
       if (handleUnauthorized(res)) return;
       const data = await res.json();
@@ -601,9 +554,7 @@ function App() {
 
   async function loadSettings() {
     try {
-      const res = await fetch(apiUrl(withWebQuery("/api/settings")), {
-        headers: authHeaders,
-      });
+      const res = await fetch(apiUrl(withWebQuery("/api/settings")), withAuth());
       if (handleUnauthorized(res)) return;
       const data = await res.json();
       if (data?.currencyCode) {
@@ -617,6 +568,11 @@ function App() {
 
   useEffect(() => {
     if (!telegramReady) return;
+    if (!initData) {
+      setError("Открой мини‑приложение из Telegram");
+      return;
+    }
+    setError("");
     loadMeta();
     loadSettings();
     loadCategories();
@@ -624,7 +580,7 @@ function App() {
     loadIncomeSources();
     loadGoals();
     loadOperations();
-  }, [telegramReady, initData, webUserId]);
+  }, [telegramReady, initData]);
 
   useEffect(() => {
     const isEditable = (el) => {
@@ -703,7 +659,6 @@ function App() {
     categoryDetail?.id,
     goalDetail?.id,
     initData,
-    webUserId,
   ]);
 
   useEffect(() => {
@@ -729,7 +684,6 @@ function App() {
     categoryDetail?.id,
     goalDetail?.id,
     initData,
-    webUserId,
   ]);
 
   useEffect(() => {
@@ -1037,12 +991,12 @@ function App() {
         category: selectedCategory.name,
         account: selectedAccount,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
 
       const res = await fetch(apiUrl("/api/operations"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1063,11 +1017,11 @@ function App() {
     try {
       const budgetValue = parseNumberInput(newCategoryBudget);
       const payload = { name, budget: budgetValue ?? null };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/categories"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1094,11 +1048,11 @@ function App() {
     try {
       const budgetValue = parseNumberInput(editingCategoryBudget);
       const payload = { name, budget: budgetValue ?? null };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(`/api/categories/${id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1120,11 +1074,11 @@ function App() {
     if (!confirm("Удалить категорию?")) return;
     try {
       const payload = {};
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/categories/${id}`)), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1145,11 +1099,11 @@ function App() {
   async function updateCurrency(code) {
     try {
       const payload = { currencyCode: code };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1176,11 +1130,11 @@ function App() {
         includeInBalance: accountEditor?.includeInBalance !== false,
         openingBalance: parsedBalance ?? 0,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/accounts"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1202,11 +1156,11 @@ function App() {
     if (!name) return;
     try {
       const payload = { name };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/income-sources"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1227,11 +1181,11 @@ function App() {
     if (!name) return;
     try {
       const payload = { name };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(`/api/income-sources/${id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1253,11 +1207,11 @@ function App() {
     if (!confirm("Удалить источник дохода?")) return;
     try {
       const payload = {};
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/income-sources/${id}`)), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1305,11 +1259,11 @@ function App() {
         notifyStartDate: goalNotifyStartDate || null,
         notifyTime: goalNotifyTime || null,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl("/api/goals"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1354,11 +1308,11 @@ function App() {
         notifyStartDate: goalNotifyStartDate || null,
         notifyTime: goalNotifyTime || null,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(`/api/goals/${id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1395,11 +1349,11 @@ function App() {
         mode: goalDeleteMode,
         transferAccount: goalDeleteMode === "transfer" ? goalDeleteAccount || null : null,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/goals/${id}`)), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1439,11 +1393,11 @@ function App() {
         type,
         account: accountValue || null,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(`/api/goals/${goalId}/transactions`), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1477,13 +1431,13 @@ function App() {
         date: entry.date,
         account: entry.account || null,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(
         apiUrl(`/api/goals/${entry.goalId}/transactions/${entry.id}`),
         {
           method: "PUT",
           headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
           body: JSON.stringify(payload),
         }
       );
@@ -1502,13 +1456,13 @@ function App() {
     if (!confirm("Удалить операцию?")) return;
     try {
       const payload = {};
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(
         apiUrl(withWebQuery(`/api/goals/${entry.goalId}/transactions/${entry.id}`)),
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
           body: JSON.stringify(payload),
         }
       );
@@ -1538,12 +1492,12 @@ function App() {
         includeInBalance: accountEditor?.includeInBalance !== false,
         openingBalance,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const current = accounts.find((acc) => acc.id === id);
       const res = await fetch(apiUrl(`/api/accounts/${id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1569,12 +1523,12 @@ function App() {
     if (!confirm("Удалить счет?")) return;
     try {
       const payload = {};
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const current = accounts.find((acc) => acc.id === id);
       const res = await fetch(apiUrl(withWebQuery(`/api/accounts/${id}`)), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1601,11 +1555,11 @@ function App() {
         incomeSource: entry.incomeSource,
       };
       if (entry.date) payload.date = entry.date;
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/operations/${entry.id}`)), {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1634,11 +1588,11 @@ function App() {
         label: entry.label,
         date: entry.date,
       };
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/operations`)), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();
@@ -1659,11 +1613,11 @@ function App() {
     if (!confirm("Удалить операцию?")) return;
     try {
       const payload = {};
-      if (webUserId) payload.webUserId = webUserId;
       if (initData) payload.initData = initData;
       const res = await fetch(apiUrl(withWebQuery(`/api/operations/${entry.id}`)), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", ...authHeaders },
+        credentials: "include",
         body: JSON.stringify(payload),
       });
       const data = await res.json();

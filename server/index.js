@@ -32,6 +32,21 @@ app.use(
 );
 app.use(express.json());
 
+function parseCookies(cookieHeader = "") {
+  return cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const idx = part.indexOf("=");
+      if (idx === -1) return acc;
+      const key = part.slice(0, idx).trim();
+      const value = part.slice(idx + 1).trim();
+      acc[key] = decodeURIComponent(value);
+      return acc;
+    }, {});
+}
+
 const uploadDir = path.join(process.env.TMPDIR || "/tmp", "finance_app_uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -193,6 +208,17 @@ async function initDb() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      session_id text PRIMARY KEY,
+      owner_id text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      last_seen timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+  await dbPool.query(
+    "CREATE INDEX IF NOT EXISTS user_sessions_owner_id_idx ON user_sessions(owner_id);"
+  );
   await dbPool.query(
     "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS onboarding_greeting_message_id bigint;"
   );
@@ -922,44 +948,69 @@ function startGoalNotificationLoop() {
   );
 }
 
-function getOwnerFromRequest(req) {
+async function getOwnerFromRequest(req, res) {
+  const cookies = parseCookies(req.headers.cookie || "");
+  const existingSession = cookies.finance_sid || null;
+  if (dbPool && existingSession) {
+    try {
+      const { rows } = await dbPool.query(
+        "SELECT owner_id FROM user_sessions WHERE session_id = $1 LIMIT 1",
+        [existingSession]
+      );
+      if (rows.length) {
+        await dbPool.query(
+          "UPDATE user_sessions SET last_seen = now() WHERE session_id = $1",
+          [existingSession]
+        );
+        return { ownerId: rows[0].owner_id, source: "session" };
+      }
+    } catch (err) {
+      console.error("Session lookup failed:", err?.message || err);
+    }
+  }
+
   const initData =
     req.header("x-telegram-init-data") ||
     req.body?.initData ||
     req.query?.initData ||
     null;
-  const webUserIdCandidate =
-    req.header("x-web-user-id") || req.body?.webUserId || req.query?.webUserId || null;
-  const authDebug = {
-    path: req.path,
-    hasInitData: !!initData,
-    hasWebUserId: !!webUserIdCandidate,
-    headerInitData: !!req.header("x-telegram-init-data"),
-    headerWebUserId: !!req.header("x-web-user-id"),
-    queryInitData: !!req.query?.initData,
-    queryWebUserId: !!req.query?.webUserId,
-  };
-  if (initData) {
-    const verified = verifyTelegramInitData(initData);
-    if (!verified.ok) {
-      console.warn("Auth failed: invalid Telegram init data", {
-        error: verified.error,
-        ...authDebug,
-      });
-      const webUserIdFallback = webUserIdCandidate;
-      if (webUserIdFallback) {
-        return { ownerId: String(webUserIdFallback), source: "fallback" };
-      }
-      return { error: verified.error };
+  if (!initData) {
+    return { error: "Missing Telegram init data" };
+  }
+
+  const verified = verifyTelegramInitData(initData);
+  if (!verified.ok) {
+    console.warn("Auth failed: invalid Telegram init data", verified.error);
+    return { error: verified.error };
+  }
+
+  const ownerId = verified.userId;
+  const sessionId =
+    existingSession ||
+    `sid_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  if (dbPool) {
+    try {
+      await dbPool.query(
+        `
+        INSERT INTO user_sessions (session_id, owner_id)
+        VALUES ($1, $2)
+        ON CONFLICT (session_id)
+        DO UPDATE SET owner_id = EXCLUDED.owner_id, last_seen = now()
+      `,
+        [sessionId, ownerId]
+      );
+    } catch (err) {
+      console.error("Session save failed:", err?.message || err);
     }
-    return { ownerId: verified.userId, source: "telegram" };
   }
-  const webUserId = webUserIdCandidate;
-  if (webUserId) {
-    return { ownerId: String(webUserId), source: "web" };
-  }
-  console.warn("Auth missing: no init data or web user id", authDebug);
-  return { ownerId: null, source: null };
+  const secureFlag = process.env.NODE_ENV === "production" ? " Secure;" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `finance_sid=${encodeURIComponent(
+      sessionId
+    )}; Path=/; Max-Age=31536000; SameSite=Lax;${secureFlag}`
+  );
+  return { ownerId, source: "telegram" };
 }
 
 function getCurrencySymbol(code) {
@@ -2100,7 +2151,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
 app.post("/api/operations", async (req, res) => {
   const { text, category, account, type, amount, label, incomeSource, date } = req.body || {};
-  const owner = getOwnerFromRequest(req);
+  const owner = await getOwnerFromRequest(req, res);
   if (owner?.error) {
     return res.status(401).json({ error: "Invalid Telegram data" });
   }
@@ -2732,7 +2783,7 @@ app.post("/telegram/webhook", (req, res) => {
 
 app.get("/api/operations", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -2788,7 +2839,7 @@ app.get("/api/operations", async (req, res) => {
 
 app.put("/api/operations/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -2956,7 +3007,7 @@ app.put("/api/operations/:id", async (req, res) => {
 
 app.delete("/api/operations/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -2980,7 +3031,7 @@ app.delete("/api/operations/:id", async (req, res) => {
 
 app.get("/api/categories", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3003,7 +3054,7 @@ app.get("/api/categories", async (req, res) => {
 
 app.post("/api/categories", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3037,7 +3088,7 @@ app.post("/api/categories", async (req, res) => {
 
 app.put("/api/categories/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3086,7 +3137,7 @@ app.put("/api/categories/:id", async (req, res) => {
 
 app.delete("/api/categories/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3135,7 +3186,7 @@ app.delete("/api/categories/:id", async (req, res) => {
 
 app.get("/api/income-sources", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3152,7 +3203,7 @@ app.get("/api/income-sources", async (req, res) => {
 
 app.post("/api/income-sources", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3180,7 +3231,7 @@ app.post("/api/income-sources", async (req, res) => {
 
 app.put("/api/income-sources/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3223,7 +3274,7 @@ app.put("/api/income-sources/:id", async (req, res) => {
 
 app.delete("/api/income-sources/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3273,7 +3324,7 @@ app.delete("/api/income-sources/:id", async (req, res) => {
 
 app.get("/api/accounts", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3299,7 +3350,7 @@ app.get("/api/accounts", async (req, res) => {
 
 app.post("/api/accounts", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3370,7 +3421,7 @@ app.post("/api/accounts", async (req, res) => {
 
 app.put("/api/accounts/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3440,7 +3491,7 @@ app.put("/api/accounts/:id", async (req, res) => {
 
 app.delete("/api/accounts/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3494,7 +3545,7 @@ app.delete("/api/accounts/:id", async (req, res) => {
 
 app.get("/api/goals", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3511,7 +3562,7 @@ app.get("/api/goals", async (req, res) => {
 
 app.post("/api/goals", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3581,7 +3632,7 @@ app.post("/api/goals", async (req, res) => {
 
 app.put("/api/goals/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3660,7 +3711,7 @@ app.put("/api/goals/:id", async (req, res) => {
 
 app.delete("/api/goals/:id", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3748,7 +3799,7 @@ app.delete("/api/goals/:id", async (req, res) => {
 
 app.get("/api/goals/:id/transactions", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3782,7 +3833,7 @@ app.get("/api/goals/:id/transactions", async (req, res) => {
 
 app.post("/api/goals/:id/transactions", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3884,7 +3935,7 @@ app.post("/api/goals/:id/transactions", async (req, res) => {
 
 app.put("/api/goals/:id/transactions/:txId", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -3987,7 +4038,7 @@ app.put("/api/goals/:id/transactions/:txId", async (req, res) => {
 
 app.delete("/api/goals/:id/transactions/:txId", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -4036,7 +4087,7 @@ app.delete("/api/goals/:id/transactions/:txId", async (req, res) => {
 
 app.get("/api/settings", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -4056,7 +4107,7 @@ app.get("/api/settings", async (req, res) => {
 
 app.put("/api/settings", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     if (owner?.error) {
       return res.status(401).json({ error: "Invalid Telegram data" });
     }
@@ -4081,7 +4132,7 @@ app.put("/api/settings", async (req, res) => {
 
 app.get("/api/meta", async (req, res) => {
   try {
-    const owner = getOwnerFromRequest(req);
+    const owner = await getOwnerFromRequest(req, res);
     const accountsList = owner?.ownerId
       ? await getAccountsForOwner(owner.ownerId)
       : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
