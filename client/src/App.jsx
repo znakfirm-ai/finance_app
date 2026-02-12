@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-const apiUrl = (path) => `${API_BASE}${path}`;
+const normalizeApiBase = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/")) return raw.replace(/\/$/, "");
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, "");
+  return `https://${raw.replace(/\/$/, "")}`;
+};
+
+const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
+const apiUrl = (path) => (API_BASE ? `${API_BASE}${path}` : path);
 
 const IconHome = () => (
   <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
