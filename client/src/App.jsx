@@ -1682,9 +1682,9 @@ function App() {
     if (initData) payload.initData = initData;
     try {
       const res = await fetch(targetUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(payload),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
