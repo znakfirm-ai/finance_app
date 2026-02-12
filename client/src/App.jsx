@@ -1670,7 +1670,7 @@ function App() {
       setDebtPaymentMessage("Выберите счет");
       return;
     }
-    const endpoint = withWebQuery(`/api/debts/${debtDetail.id}/payments`);
+    const endpoint = `/api/debts/${debtDetail.id}/payments`;
     const targetUrl = apiUrl(endpoint);
     const payload = {
       amount,
