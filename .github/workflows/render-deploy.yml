@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: {}
 
 jobs:
   deploy-render:
@@ -12,9 +13,11 @@ jobs:
       - name: Trigger Render deploy hook
         env:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          RENDER_DEPLOY_HOOK_VAR: ${{ vars.RENDER_DEPLOY_HOOK }}
         run: |
-          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
-            echo "Missing RENDER_DEPLOY_HOOK secret"
+          HOOK="${RENDER_DEPLOY_HOOK:-$RENDER_DEPLOY_HOOK_VAR}"
+          if [ -z "$HOOK" ]; then
+            echo "Missing RENDER_DEPLOY_HOOK secret or variable"
             exit 1
           fi
-          curl -s -X POST "$RENDER_DEPLOY_HOOK"
+          curl -s -X POST "$HOOK"
