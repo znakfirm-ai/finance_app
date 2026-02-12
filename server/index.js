@@ -928,12 +928,25 @@ function getOwnerFromRequest(req) {
     req.body?.initData ||
     req.query?.initData ||
     null;
+  const webUserIdCandidate =
+    req.header("x-web-user-id") || req.body?.webUserId || req.query?.webUserId || null;
+  const authDebug = {
+    path: req.path,
+    hasInitData: !!initData,
+    hasWebUserId: !!webUserIdCandidate,
+    headerInitData: !!req.header("x-telegram-init-data"),
+    headerWebUserId: !!req.header("x-web-user-id"),
+    queryInitData: !!req.query?.initData,
+    queryWebUserId: !!req.query?.webUserId,
+  };
   if (initData) {
     const verified = verifyTelegramInitData(initData);
     if (!verified.ok) {
-      console.warn("Telegram init data verification failed:", verified.error);
-      const webUserIdFallback =
-        req.header("x-web-user-id") || req.body?.webUserId || req.query?.webUserId || null;
+      console.warn("Auth failed: invalid Telegram init data", {
+        error: verified.error,
+        ...authDebug,
+      });
+      const webUserIdFallback = webUserIdCandidate;
       if (webUserIdFallback) {
         return { ownerId: String(webUserIdFallback), source: "fallback" };
       }
@@ -941,11 +954,11 @@ function getOwnerFromRequest(req) {
     }
     return { ownerId: verified.userId, source: "telegram" };
   }
-  const webUserId =
-    req.header("x-web-user-id") || req.body?.webUserId || req.query?.webUserId || null;
+  const webUserId = webUserIdCandidate;
   if (webUserId) {
     return { ownerId: String(webUserId), source: "web" };
   }
+  console.warn("Auth missing: no init data or web user id", authDebug);
   return { ownerId: null, source: null };
 }
 

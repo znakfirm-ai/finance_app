@@ -455,11 +455,20 @@ function App() {
     } catch (_) {}
   }
 
+  const handleUnauthorized = (res) => {
+    if (res.status === 401) {
+      setError("Не удалось определить пользователя");
+      return true;
+    }
+    return false;
+  };
+
   async function loadAccounts() {
     try {
       const res = await fetch(apiUrl(withWebQuery("/api/accounts")), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       setAccounts(Array.isArray(data) ? data : []);
     } catch (_) {}
@@ -470,6 +479,7 @@ function App() {
       const res = await fetch(apiUrl(withWebQuery("/api/income-sources")), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       setIncomeSources(Array.isArray(data) ? data : []);
     } catch (_) {}
@@ -480,6 +490,7 @@ function App() {
       const res = await fetch(apiUrl(withWebQuery("/api/categories")), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       setCategories(Array.isArray(data) ? data : []);
     } catch (_) {}
@@ -490,6 +501,7 @@ function App() {
       const res = await fetch(apiUrl(withWebQuery("/api/goals")), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       setGoals(Array.isArray(data) ? data : []);
     } catch (_) {}
@@ -500,6 +512,7 @@ function App() {
       const res = await fetch(apiUrl(withWebQuery("/api/operations")), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       setOperations(Array.isArray(data) ? data : []);
     } catch (_) {}
@@ -541,6 +554,7 @@ function App() {
       const res = await fetch(apiUrl(withWebQuery(endpoint)), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       const items = Array.isArray(data) ? data : [];
       if (reset) {
@@ -564,6 +578,7 @@ function App() {
       const res = await fetch(apiUrl(withWebQuery("/api/settings")), {
         headers: authHeaders,
       });
+      if (handleUnauthorized(res)) return;
       const data = await res.json();
       if (data?.currencyCode) {
         setSettings({
