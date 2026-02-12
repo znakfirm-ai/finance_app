@@ -390,6 +390,12 @@ function App() {
   const [debtDueDate, setDebtDueDate] = useState("");
   const [debtNotes, setDebtNotes] = useState("");
   const [debtCurrencyCode, setDebtCurrencyCode] = useState("RUB");
+  const [debtPaymentFormOpen, setDebtPaymentFormOpen] = useState(false);
+  const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
+  const [debtPaymentDate, setDebtPaymentDate] = useState("");
+  const [debtPaymentAccount, setDebtPaymentAccount] = useState("");
+  const [debtPaymentNote, setDebtPaymentNote] = useState("");
+  const [debtPaymentMessage, setDebtPaymentMessage] = useState("");
   const [debtDeleteOpen, setDebtDeleteOpen] = useState(false);
   const [debtDeleteMode, setDebtDeleteMode] = useState("transfer");
   const [debtDeleteAccount, setDebtDeleteAccount] = useState("");
@@ -627,6 +633,39 @@ function App() {
     }
   }
 
+  async function loadDebtPayments() {
+    if (!debtDetail?.id) return;
+    if (historyLoading) return;
+    setHistoryLoading(true);
+    try {
+      const searchQuery = historyQueryDebounced.trim();
+      const params = new URLSearchParams();
+      params.set("limit", "500");
+      if (searchQuery) {
+        params.set("q", searchQuery);
+      }
+      const range = getPeriodRange();
+      if (range) {
+        params.set("from", range.start.toISOString());
+        params.set("to", range.end.toISOString());
+      }
+      const res = await fetch(
+        apiUrl(withWebQuery(`/api/debts/${debtDetail.id}/payments?${params}`)),
+        { headers: authHeaders }
+      );
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : [];
+      setHistoryItems(items);
+      setHistoryBefore(null);
+      setHistoryHasMore(false);
+    } catch (_) {
+      setHistoryItems([]);
+      setHistoryHasMore(false);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
   async function loadSettings() {
     try {
       const res = await fetch(apiUrl(withWebQuery("/api/settings")), {
@@ -745,6 +784,31 @@ function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [historyQuery]);
+
+  useEffect(() => {
+    if (!debtDetail) return;
+    setDebtPaymentFormOpen(false);
+    setDebtPaymentAmount("");
+    setDebtPaymentNote("");
+    setDebtPaymentMessage("");
+    setDebtPaymentDate(formatDateInput(new Date()));
+    if (accounts.length) {
+      setDebtPaymentAccount(accounts[0].name);
+    }
+  }, [debtDetail?.id, accounts]);
+
+  useEffect(() => {
+    if (!debtDetail) return;
+    loadDebtPayments();
+  }, [
+    debtDetail?.id,
+    historyPeriod,
+    customRange.from,
+    customRange.to,
+    historyQueryDebounced,
+    initData,
+    webUserId,
+  ]);
 
   useEffect(() => {
     const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
@@ -1577,6 +1641,49 @@ function App() {
       setDebtDetail(null);
     } catch (e) {
       setDebtEditorMessage(e.message || "Ошибка");
+    }
+  }
+
+  async function addDebtPayment() {
+    if (!debtDetail?.id) return;
+    const amount = parseNumberInput(debtPaymentAmount);
+    if (!amount) {
+      setDebtPaymentMessage("Введите сумму");
+      return;
+    }
+    if (accounts.length && !debtPaymentAccount) {
+      setDebtPaymentMessage("Выберите счет");
+      return;
+    }
+    const payload = {
+      amount,
+      account: debtPaymentAccount,
+      date: debtPaymentDate || formatDateInput(new Date()),
+      note: debtPaymentNote || "",
+    };
+    if (webUserId) payload.webUserId = webUserId;
+    if (initData) payload.initData = initData;
+    try {
+      const res = await fetch(
+        apiUrl(withWebQuery(`/api/debts/${debtDetail.id}/payments`)),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders },
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
+      setDebtPaymentMessage("Сохранено");
+      setDebtPaymentAmount("");
+      setDebtPaymentNote("");
+      setTimeout(() => setDebtPaymentMessage(""), 2000);
+      setDebtPaymentFormOpen(false);
+      await loadAllDebts();
+      await loadOperations();
+      await loadDebtPayments();
+    } catch (e) {
+      setDebtPaymentMessage(e.message || "Ошибка");
     }
   }
 
@@ -3290,6 +3397,150 @@ function App() {
                 )}
               </div>
             </div>
+
+            <div className="row">
+              <input
+                className="input"
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Поиск по названию или сумме"
+              />
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setCustomRangeDraft(customRange);
+                  setShowCustomRange(historyPeriod === "custom");
+                  setShowPeriodSheet(true);
+                }}
+              >
+                Период
+              </button>
+            </div>
+            {periodRangeText && <div className="history-range">{periodRangeText}</div>}
+
+            <button
+              className="btn"
+              onClick={() => {
+                const next = !debtPaymentFormOpen;
+                setDebtPaymentFormOpen(next);
+                if (next) {
+                  setDebtPaymentAmount("");
+                  setDebtPaymentNote("");
+                  setDebtPaymentMessage("");
+                  setDebtPaymentDate(formatDateInput(new Date()));
+                  if (accounts.length) {
+                    setDebtPaymentAccount(accounts[0].name);
+                  }
+                }
+              }}
+            >
+              Добавить платеж
+            </button>
+
+            {debtPaymentFormOpen && (
+              <div className="goal-transfer">
+                <label className="label">Сумма платежа</label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={debtPaymentAmount}
+                  onChange={(e) => setDebtPaymentAmount(e.target.value)}
+                />
+                <label className="label">Дата платежа</label>
+                <DateSlotPicker
+                  value={debtPaymentDate || formatDateInput(new Date())}
+                  ariaLabel="Дата платежа"
+                  onChange={(value) => setDebtPaymentDate(value)}
+                />
+                <label className="label">Счет</label>
+                {accounts.length ? (
+                  <select
+                    className="select"
+                    value={debtPaymentAccount}
+                    onChange={(e) => setDebtPaymentAccount(e.target.value)}
+                  >
+                    <option value="">Выберите счет</option>
+                    {accounts.map((acc) => (
+                      <option key={acc.id} value={acc.name}>
+                        {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="muted">Нет счетов</div>
+                )}
+                <label className="label">Комментарий</label>
+                <input
+                  className="input"
+                  value={debtPaymentNote}
+                  onChange={(e) => setDebtPaymentNote(e.target.value)}
+                  placeholder="Комментарий"
+                />
+                <button className="btn" onClick={addDebtPayment}>
+                  Сохранить
+                </button>
+                {debtPaymentMessage && (
+                  <div
+                    className={
+                      /ошиб|выберите|введите/i.test(debtPaymentMessage)
+                        ? "error"
+                        : "status success"
+                    }
+                  >
+                    {debtPaymentMessage}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="history-list" ref={historyListRef} onScroll={handleHistoryScroll}>
+              {groupedHistory.length === 0 ? (
+                <div className="muted">Пока нет операций</div>
+              ) : (
+                groupedHistory.map((group) => (
+                  <div key={group.key} className="history-group">
+                    <div className="history-date-row">
+                      <div className="history-date">{group.key}</div>
+                    </div>
+                    <div className="history-rows">
+                      {group.items.map((op) => (
+                        <button
+                          key={op.id}
+                          className="history-row"
+                          onClick={() =>
+                            setOperationEditor({
+                              mode: "edit",
+                              id: op.id,
+                              label: op.label || op.text || "",
+                              amount: op.amount,
+                              account: op.account,
+                              category: op.category || "Прочее",
+                              incomeSource: op.incomeSource || op.category || "",
+                              type: op.type,
+                              date: formatDateInput(
+                                op.createdAt || op.date || op.created_at || ""
+                              ),
+                            })
+                          }
+                        >
+                          <div className="history-row-main">
+                            <span className="history-label">{op.label || op.text}</span>
+                            <span className="history-meta">{getOperationFlowLine(op)}</span>
+                          </div>
+                          <span
+                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
+                          >
+                            {formatSignedMoney(op.amount, op.type, settings.currencySymbol)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
             <button
               className="btn ghost"
               onClick={() =>

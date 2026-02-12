@@ -471,6 +471,8 @@ async function listOperations({
   type = null,
   incomeSource = null,
   category = null,
+  sourceType = null,
+  sourceId = null,
   includeInternal = false,
   search = null,
   before = null,
@@ -492,6 +494,12 @@ async function listOperations({
     }
     if (category) {
       data = data.filter((op) => op.category === category);
+    }
+    if (sourceType) {
+      data = data.filter((op) => op.sourceType === sourceType);
+    }
+    if (sourceId) {
+      data = data.filter((op) => op.sourceId === sourceId);
     }
     if (search) {
       const q = String(search).toLowerCase();
@@ -551,6 +559,14 @@ async function listOperations({
   if (category) {
     params.push(category);
     where.push(`category = $${params.length}`);
+  }
+  if (sourceType) {
+    params.push(sourceType);
+    where.push(`source_type = $${params.length}`);
+  }
+  if (sourceId) {
+    params.push(sourceId);
+    where.push(`source_id = $${params.length}`);
   }
   if (search) {
     const like = `%${String(search).toLowerCase()}%`;
@@ -1527,45 +1543,24 @@ async function listDebtsForOwner(ownerId, kind) {
   );
   if (!rows.length) return [];
   const ids = rows.map((row) => row.id);
-  const { rows: scheduleRows } = await dbPool.query(
-    `SELECT debt_id, amount, paid, paid_amount, due_date, interest_paid
-     FROM debt_schedule
-     WHERE owner_id = $1 AND debt_id = ANY($2::text[])`,
+  const { rows: paymentRows } = await dbPool.query(
+    `SELECT source_id, COALESCE(SUM(amount), 0) AS paid_total
+     FROM operations
+     WHERE telegram_user_id = $1 AND source_type = 'debt_payment' AND source_id = ANY($2::text[])
+     GROUP BY source_id`,
     [ownerId, ids]
   );
-  const scheduleMap = new Map();
-  scheduleRows.forEach((row) => {
-    if (!scheduleMap.has(row.debt_id)) {
-      scheduleMap.set(row.debt_id, []);
-    }
-    scheduleMap.get(row.debt_id).push(row);
+  const paidMap = new Map();
+  paymentRows.forEach((row) => {
+    paidMap.set(row.source_id, Number(row.paid_total) || 0);
   });
   return rows.map((row) => {
-    const schedule = scheduleMap.get(row.id) || [];
     const plannedTotal =
       row.total_amount !== null && row.total_amount !== undefined && Number(row.total_amount) > 0
         ? Number(row.total_amount)
-        : schedule.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const paidTotal = schedule.reduce((sum, item) => {
-      if (item.paid_amount !== null && item.paid_amount !== undefined) {
-        return sum + Number(item.paid_amount);
-      }
-      if (item.paid) {
-        return sum + Number(item.amount || 0);
-      }
-      return sum;
-    }, 0);
-    const interestEarned = schedule.reduce((sum, item) => {
-      const value =
-        item.interest_paid !== null && item.interest_paid !== undefined
-          ? Number(item.interest_paid)
-          : 0;
-      return sum + value;
-    }, 0);
+        : 0;
+    const paidTotal = paidMap.get(row.id) || 0;
     const remaining = Math.max(0, plannedTotal - paidTotal);
-    const nextPayment = schedule
-      .filter((item) => !item.paid && item.due_date)
-      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))[0];
     return {
       id: row.id,
       name: row.name,
@@ -1576,7 +1571,7 @@ async function listDebtsForOwner(ownerId, kind) {
           : 0,
       totalAmount: plannedTotal,
       paidTotal,
-      interestEarned: row.kind === "owed_to_me" ? interestEarned : 0,
+      interestEarned: 0,
       remaining,
       currencyCode: row.currency_code || null,
       issuedDate: row.issued_date ? new Date(row.issued_date).toISOString() : null,
@@ -1595,11 +1590,8 @@ async function listDebtsForOwner(ownerId, kind) {
         ? new Date(row.first_payment_date).toISOString()
         : null,
       createdAt: row.created_at ? row.created_at.toISOString() : null,
-      nextPaymentDate: nextPayment?.due_date ? new Date(nextPayment.due_date).toISOString() : null,
-      nextPaymentAmount:
-        nextPayment?.amount !== null && nextPayment?.amount !== undefined
-          ? Number(nextPayment.amount)
-          : null,
+      nextPaymentDate: null,
+      nextPaymentAmount: null,
     };
   });
 }
@@ -3140,6 +3132,8 @@ app.get("/api/operations", async (req, res) => {
     const incomeSource = req.query?.incomeSource
       ? String(req.query.incomeSource)
       : null;
+    const sourceType = req.query?.sourceType ? String(req.query.sourceType) : null;
+    const sourceId = req.query?.sourceId ? String(req.query.sourceId) : null;
     const includeInternal =
       req.query?.includeInternal === "1" ||
       req.query?.includeInternal === "true";
@@ -3159,6 +3153,8 @@ app.get("/api/operations", async (req, res) => {
       type,
       category,
       incomeSource,
+      sourceType,
+      sourceId,
       includeInternal,
       search,
       before,
@@ -4858,22 +4854,20 @@ app.delete("/api/debts/:id", async (req, res) => {
         debtKind = debtRow.rows[0].kind;
         debtName = debtRow.rows[0].name || "";
         const totalAmountRaw = debtRow.rows[0].total_amount;
-        const scheduleRows = await client.query(
-          "SELECT amount, paid, paid_amount FROM debt_schedule WHERE debt_id = $1 AND owner_id = $2",
-          [id, owner.ownerId]
-        );
         const plannedTotal =
           totalAmountRaw !== null && totalAmountRaw !== undefined && Number(totalAmountRaw) > 0
             ? Number(totalAmountRaw)
-            : scheduleRows.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-        const paidTotal = scheduleRows.rows.reduce((sum, row) => {
-          if (!row.paid) return sum;
-          const value =
-            row.paid_amount !== null && row.paid_amount !== undefined
-              ? Number(row.paid_amount)
-              : Number(row.amount || 0);
-          return sum + value;
-        }, 0);
+            : 0;
+        const paidRow = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) AS paid_total
+           FROM operations
+           WHERE telegram_user_id = $1 AND source_type = 'debt_payment' AND source_id = $2`,
+          [owner.ownerId, id]
+        );
+        const paidTotal =
+          paidRow.rows[0]?.paid_total !== null && paidRow.rows[0]?.paid_total !== undefined
+            ? Number(paidRow.rows[0].paid_total)
+            : 0;
         remaining = Math.max(0, roundMoney(plannedTotal - paidTotal));
         if (remaining > 0) {
           if (!transferAccount) {
@@ -4959,6 +4953,176 @@ app.delete("/api/debts/:id", async (req, res) => {
   } catch (err) {
     console.error("Delete debt failed:", err?.message || err);
     res.status(500).json({ error: "Failed to delete debt" });
+  }
+});
+
+app.get("/api/debts/:id/payments", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const id = String(req.params.id || "");
+    if (!id) return res.status(400).json({ error: "Invalid debt id" });
+    const limitRaw = Number(req.query?.limit || 200);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 200;
+    const search = req.query?.q ? String(req.query.q) : req.query?.search ? String(req.query.search) : null;
+    const parseDateParam = (value) => {
+      if (!value) return null;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return null;
+      return date.toISOString();
+    };
+    const before = parseDateParam(req.query?.before);
+    const from = parseDateParam(req.query?.from);
+    const to = parseDateParam(req.query?.to);
+    const data = await listOperations({
+      limit,
+      telegramUserId: owner.ownerId,
+      sourceType: "debt_payment",
+      sourceId: id,
+      search,
+      before,
+      from,
+      to,
+      includeInternal: true,
+    });
+    res.json(data);
+  } catch (err) {
+    console.error("Load debt payments failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to load payments" });
+  }
+});
+
+app.post("/api/debts/:id/payments", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const debtId = String(req.params.id || "");
+    if (!debtId) return res.status(400).json({ error: "Invalid debt id" });
+    const amountValue = roundMoney(req.body?.amount || 0);
+    if (!amountValue) {
+      return res.status(400).json({ error: "Amount is required" });
+    }
+    const accountRaw = String(req.body?.account || "").trim();
+    if (!accountRaw) {
+      return res.status(400).json({ error: "Account is required" });
+    }
+    const note = String(req.body?.note || "").trim();
+    const dateInput = String(req.body?.date || "").trim();
+    if (!dbPool) return res.status(400).json({ error: "Database unavailable" });
+
+    const debtRow = await dbPool.query(
+      "SELECT id, name, kind FROM debts WHERE id = $1 AND owner_id = $2",
+      [debtId, owner.ownerId]
+    );
+    if (!debtRow.rows.length) {
+      return res.status(404).json({ error: "Debt not found" });
+    }
+    const debt = debtRow.rows[0];
+    const typeValue = debt.kind === "owed_to_me" ? "income" : "expense";
+    const accountsList = await getAccountsForOwner(owner.ownerId);
+    const accountMatch = accountsList.find(
+      (acc) => String(acc.name).toLowerCase() === accountRaw.toLowerCase()
+    );
+    if (!accountMatch) {
+      return res.status(400).json({ error: "Account not found" });
+    }
+    const categoriesList = await getCategoriesForOwner(owner.ownerId);
+    const incomeSourcesList = await getIncomeSourcesForOwner(owner.ownerId);
+    const resolvedIncomeSource =
+      typeValue === "income"
+        ? incomeSourcesList.find((name) =>
+            String(name.name || "").toLowerCase().includes("проч")
+          )?.name ||
+          incomeSourcesList[0]?.name ||
+          "Прочее"
+        : null;
+    const resolvedCategory =
+      typeValue === "income"
+        ? resolvedIncomeSource || "Прочее"
+        : categoriesList.find((c) =>
+            String(c.name || "").toLowerCase().includes("друг")
+          )?.name ||
+          categoriesList[0]?.name ||
+          "Другое";
+    const baseLabel = `Платеж по долгу: ${debt.name || "Должник"}`;
+    const label = note ? `${baseLabel} — ${note}` : baseLabel;
+    const parseDateOnly = (value) => {
+      if (!value) return null;
+      const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        const year = Number(match[1]);
+        const month = Number(match[2]) - 1;
+        const day = Number(match[3]);
+        return new Date(Date.UTC(year, month, day, 12, 0, 0));
+      }
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return null;
+      return parsed;
+    };
+    const createdAt = parseDateOnly(dateInput) || new Date();
+    const settings = await getUserSettings(owner.ownerId);
+    const currencySymbol = getCurrencySymbol(settings.currencyCode);
+    const op = {
+      id: `op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      text: label,
+      type: typeValue,
+      amount: amountValue,
+      amountCents: Math.round(amountValue * 100),
+      category: resolvedCategory,
+      account: accountMatch.name,
+      accountSpecified: true,
+      incomeSource: resolvedIncomeSource,
+      excludeFromSummary: false,
+      sourceType: "debt_payment",
+      sourceId: debtId,
+      createdAt: createdAt.toISOString(),
+      telegramUserId: owner.ownerId,
+    };
+    Object.assign(op, buildDisplayFields(label, op, currencySymbol));
+    await saveOperation(op);
+    res.json(op);
+  } catch (err) {
+    console.error("Create debt payment failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to create payment" });
+  }
+});
+
+app.delete("/api/debts/:id/payments/:pid", async (req, res) => {
+  try {
+    const owner = getOwnerFromRequest(req);
+    if (owner?.error) {
+      return res.status(401).json({ error: "Invalid Telegram data" });
+    }
+    if (!owner?.ownerId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const debtId = String(req.params.id || "");
+    const pid = String(req.params.pid || "");
+    if (!debtId || !pid) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
+    const op = await getOperationById(pid, owner.ownerId);
+    if (!op || op.sourceType !== "debt_payment" || op.sourceId !== debtId) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+    const deleted = await deleteOperationById(pid, owner.ownerId);
+    if (!deleted) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Delete debt payment failed:", err?.message || err);
+    res.status(500).json({ error: "Failed to delete payment" });
   }
 });
 
