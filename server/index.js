@@ -932,7 +932,8 @@ function getOwnerFromRequest(req) {
     const verified = verifyTelegramInitData(initData);
     if (!verified.ok) {
       console.warn("Telegram init data verification failed:", verified.error);
-      const webUserIdFallback = req.body?.webUserId || req.query?.webUserId || null;
+      const webUserIdFallback =
+        req.header("x-web-user-id") || req.body?.webUserId || req.query?.webUserId || null;
       if (webUserIdFallback) {
         return { ownerId: String(webUserIdFallback), source: "fallback" };
       }
@@ -940,7 +941,8 @@ function getOwnerFromRequest(req) {
     }
     return { ownerId: verified.userId, source: "telegram" };
   }
-  const webUserId = req.body?.webUserId || req.query?.webUserId || null;
+  const webUserId =
+    req.header("x-web-user-id") || req.body?.webUserId || req.query?.webUserId || null;
   if (webUserId) {
     return { ownerId: String(webUserId), source: "web" };
   }

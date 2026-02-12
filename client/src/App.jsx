@@ -429,8 +429,11 @@ function App() {
   }, []);
 
   const authHeaders = useMemo(() => {
-    return initData ? { "x-telegram-init-data": initData } : {};
-  }, [initData]);
+    const headers = {};
+    if (initData) headers["x-telegram-init-data"] = initData;
+    if (webUserId) headers["x-web-user-id"] = webUserId;
+    return headers;
+  }, [initData, webUserId]);
 
   function withWebQuery(path) {
     const params = new URLSearchParams();
