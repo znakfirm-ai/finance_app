@@ -354,7 +354,10 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState(null);
-  const [webUserId, setWebUserId] = useState(() => getStoredWebUserId());
+  const [sessionUserId] = useState(
+    () => `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  );
+  const [webUserId, setWebUserId] = useState(() => getStoredWebUserId() || sessionUserId);
   const [telegramReady, setTelegramReady] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryEditor, setCategoryEditor] = useState(null);
@@ -429,28 +432,38 @@ function App() {
         setTelegramReady(true);
         return;
       }
-      const fallbackId = getStoredWebUserId();
+      const fallbackId = getStoredWebUserId() || sessionUserId;
       if (fallbackId) setWebUserId(fallbackId);
       setTelegramReady(true);
       return;
     }
     if (!tg) {
-      const fallbackId = getStoredWebUserId();
+      const fallbackId = getStoredWebUserId() || sessionUserId;
       if (fallbackId) setWebUserId(fallbackId);
     }
     setTelegramReady(true);
   }, []);
 
+  const resolvedWebUserId = useMemo(() => {
+    return webUserId || getStoredWebUserId() || sessionUserId;
+  }, [webUserId, sessionUserId]);
+
+  useEffect(() => {
+    if (!webUserId && resolvedWebUserId) {
+      setWebUserId(resolvedWebUserId);
+    }
+  }, [webUserId, resolvedWebUserId]);
+
   const authHeaders = useMemo(() => {
     const headers = {};
     if (initData) headers["x-telegram-init-data"] = initData;
-    if (webUserId) headers["x-web-user-id"] = webUserId;
+    if (resolvedWebUserId) headers["x-web-user-id"] = resolvedWebUserId;
     return headers;
-  }, [initData, webUserId]);
+  }, [initData, resolvedWebUserId]);
 
   function withWebQuery(path) {
     const params = new URLSearchParams();
-    if (webUserId) params.set("webUserId", webUserId);
+    if (resolvedWebUserId) params.set("webUserId", resolvedWebUserId);
     if (initData) params.set("initData", initData);
     const query = params.toString();
     if (!query) return path;
