@@ -1351,14 +1351,14 @@
 }
 
 .debt-banner-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
-  color: #475569;
+  color: #64748b;
 }
 
 .debt-banner-value {
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 400;
   color: #111827;
 }
 
@@ -1372,16 +1372,32 @@
 
 .debt-banner-progress {
   height: 100%;
-  background: #111827;
+  background: #2f3136;
   border-radius: inherit;
 }
 
+.debt-banner-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.debt-banner-foot-spacer {
+  flex: 1;
+}
+
+.debt-banner-foot-date {
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: right;
+}
+
 .debt-banner.positive .debt-banner-progress {
-  background: #16a34a;
+  background: #2f3136;
 }
 
 .debt-banner.negative .debt-banner-progress {
-  background: #111827;
+  background: #2f3136;
 }
 
 .debt-card-top {

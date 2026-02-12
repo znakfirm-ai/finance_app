@@ -2374,13 +2374,16 @@ function App() {
     return `${formatted} ${symbol}`;
   };
 
-  const formatMoneyPlain = (value) => {
+  const formatMoneyShort = (value, currencyCode) => {
     const amount = Number(value || 0);
     const hasCents = Math.abs(amount % 1) > 0.001;
-    return amount.toLocaleString("ru-RU", {
+    const formatted = amount.toLocaleString("ru-RU", {
       minimumFractionDigits: hasCents ? 2 : 0,
       maximumFractionDigits: 2,
     });
+    const code = String(currencyCode || "").toUpperCase();
+    const symbol = code === "RUB" ? "Р" : currencySymbolByCode(code);
+    return `${formatted} ${symbol}`;
   };
 
   const formatDisplayDate = (value) => {
@@ -3605,7 +3608,7 @@ function App() {
                 <div className="muted">Пока нет записей</div>
               ) : (
                 debtListItems.map((item) => {
-                  const debtCurrencySymbol = currencySymbolByCode(item.currencyCode);
+                  const debtCurrencyCode = item.currencyCode || settings.currencyCode || "RUB";
                   const totalAmount = Number(item.totalAmount || 0);
                   const remainingAmount = Number(item.remaining || 0);
                   const progress =
@@ -3614,8 +3617,11 @@ function App() {
                       : 0;
                   const toneClass =
                     item.kind === "owed_to_me" ? "positive" : "negative";
-                  const remainingText = formatMoneyPlain(remainingAmount);
-                  const totalText = formatMoneyPlain(totalAmount);
+                  const remainingText = formatMoneyShort(remainingAmount, debtCurrencyCode);
+                  const totalText = formatMoneyShort(totalAmount, debtCurrencyCode);
+                  const dueDateText = item.dueDate
+                    ? `до ${formatDisplayDate(item.dueDate)}`
+                    : "дата возврата —";
                   return (
                     <button
                       key={item.id}
@@ -3641,6 +3647,10 @@ function App() {
                           className="debt-banner-progress"
                           style={{ width: `${Math.round(progress * 100)}%` }}
                         />
+                      </div>
+                      <div className="debt-banner-foot">
+                        <span className="debt-banner-foot-spacer" />
+                        <span className="debt-banner-foot-date">{dueDateText}</span>
                       </div>
                     </button>
                   );
