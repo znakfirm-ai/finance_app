@@ -402,7 +402,6 @@ function App() {
   const [showBalanceRight, setShowBalanceRight] = useState(false);
 
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
     const readInitDataFromUrl = () => {
       if (typeof window === "undefined") return null;
       const searchParams = new URLSearchParams(window.location.search);
@@ -419,16 +418,32 @@ function App() {
         return raw;
       }
     };
-    const fallbackInitData = readInitDataFromUrl();
-    if (tg) {
-      tg.ready();
-      if (tg.initData) setInitData(tg.initData);
-      else if (fallbackInitData) setInitData(fallbackInitData);
-      setTelegramReady(true);
-      return;
-    }
-    if (fallbackInitData) setInitData(fallbackInitData);
-    setTelegramReady(true);
+    let attempts = 0;
+    const maxAttempts = 12;
+    const tryResolve = () => {
+      const tg = window.Telegram?.WebApp;
+      const fallbackInitData = readInitDataFromUrl();
+      if (tg) {
+        tg.ready();
+        if (tg.initData) {
+          setInitData(tg.initData);
+          setTelegramReady(true);
+          return;
+        }
+      }
+      if (fallbackInitData) {
+        setInitData(fallbackInitData);
+        setTelegramReady(true);
+        return;
+      }
+      attempts += 1;
+      if (attempts >= maxAttempts) {
+        setTelegramReady(true);
+        return;
+      }
+      setTimeout(tryResolve, 300);
+    };
+    tryResolve();
   }, []);
 
   const authHeaders = useMemo(() => {
