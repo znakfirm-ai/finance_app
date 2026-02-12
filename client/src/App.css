@@ -1311,6 +1311,80 @@
   gap: 8px;
 }
 
+.debt-banner {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: #ffffff;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.debt-banner:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+}
+
+.debt-banner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.debt-banner-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.debt-banner-amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+
+.debt-banner-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.debt-banner-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.debt-banner-bar {
+  height: 6px;
+  width: 100%;
+  background: #e2e8f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.debt-banner-progress {
+  height: 100%;
+  background: #0f172a;
+  border-radius: inherit;
+}
+
+.debt-banner.positive .debt-banner-progress {
+  background: #16a34a;
+}
+
+.debt-banner.negative .debt-banner-progress {
+  background: #f97316;
+}
+
 .debt-card-top {
   display: flex;
   justify-content: space-between;

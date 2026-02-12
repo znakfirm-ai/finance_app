@@ -509,6 +509,9 @@ async function listOperations({
         return label.includes(q) || amount.includes(q);
       });
     }
+    if (!includeInternal) {
+      data = data.filter((op) => op.excludeFromSummary !== true);
+    }
     if (from) {
       const fromDate = new Date(from);
       if (!Number.isNaN(fromDate.getTime())) {
@@ -3195,6 +3198,9 @@ app.put("/api/operations/:id", async (req, res) => {
     if (!existing) {
       return res.status(404).json({ error: "Operation not found" });
     }
+    if (existing.sourceType === "goal") {
+      return res.status(400).json({ error: "Goal transfers can only be edited from the goal" });
+    }
     const settings = await getUserSettings(owner.ownerId);
     const currencySymbol = getCurrencySymbol(settings.currencyCode);
     if (existing.type !== "income" && !category) {
@@ -3352,6 +3358,10 @@ app.delete("/api/operations/:id", async (req, res) => {
     const id = String(req.params.id || "");
     if (!id) {
       return res.status(400).json({ error: "Invalid input" });
+    }
+    const existing = await getOperationById(id, owner.ownerId);
+    if (existing?.sourceType === "goal") {
+      return res.status(400).json({ error: "Goal transfers can only be deleted from the goal" });
     }
     const deleted = await deleteOperationById(id, owner.ownerId);
     if (!deleted) {

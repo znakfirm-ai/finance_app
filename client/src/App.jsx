@@ -614,9 +614,6 @@ function App() {
       });
       const data = await res.json();
       let items = Array.isArray(data) ? data : [];
-      if (accountDetail) {
-        items = items.filter((item) => !item.excludeFromSummary);
-      }
       if (reset) {
         setHistoryItems(items);
       } else {
@@ -2106,7 +2103,6 @@ function App() {
       map.set(acc.name, { income: 0, expense: 0 });
     });
     operations.forEach((op) => {
-      if (op.excludeFromSummary) return;
       const acc = op.account || accounts[0]?.name || "Наличные";
       if (!map.has(acc)) return;
       const bucket = map.get(acc);
@@ -2291,6 +2287,8 @@ function App() {
         : debtsOwe;
   const goalPages = Math.max(1, Math.ceil((goalTiles.length + 1) / 4));
   const debtPages = Math.max(1, Math.ceil((debtTiles.length + 1) / 4));
+  const isDebtInterest =
+    incomeSourceDetail?.id && String(incomeSourceDetail.id).startsWith("interest_");
 
   const updateBalanceArrows = () => {
     const el = balanceScrollRef.current;
@@ -3599,10 +3597,18 @@ function App() {
               ) : (
                 debtListItems.map((item) => {
                   const debtCurrencySymbol = currencySymbolByCode(item.currencyCode);
+                  const totalAmount = Number(item.totalAmount || 0);
+                  const remainingAmount = Number(item.remaining || 0);
+                  const progress =
+                    totalAmount > 0
+                      ? Math.max(0, Math.min(1, (totalAmount - remainingAmount) / totalAmount))
+                      : 0;
+                  const toneClass =
+                    item.kind === "owed_to_me" ? "positive" : "negative";
                   return (
                     <button
                       key={item.id}
-                      className="debt-card"
+                      className={`debt-banner ${toneClass}`}
                       onClick={() =>
                         setDebtDetail({
                           ...item,
@@ -3610,29 +3616,20 @@ function App() {
                         })
                       }
                     >
-                      <div className="debt-card-top">
-                        <span className="debt-card-name">{item.name}</span>
-                        <span className="debt-card-amount">
-                          {formatMoney(item.totalAmount, debtCurrencySymbol)}
+                      <div className="debt-banner-header">
+                        <span className="debt-banner-name">{item.name}</span>
+                        <span className="debt-banner-amount">
+                          <span className="debt-banner-label">Остаток</span>
+                          <span className="debt-banner-value">
+                            {formatMoney(remainingAmount, debtCurrencySymbol)}
+                          </span>
                         </span>
                       </div>
-                      <div className="debt-card-meta">
-                        <div className="debt-card-meta-line">
-                          <span>Сумма займа:</span>
-                          <span>{formatMoney(item.principalAmount, debtCurrencySymbol)}</span>
-                        </div>
-                        <div className="debt-card-meta-line">
-                          <span>Дата выдачи:</span>
-                          <span>
-                            {item.issuedDate ? formatDisplayDate(item.issuedDate) : "—"}
-                          </span>
-                        </div>
-                        <div className="debt-card-meta-line">
-                          <span>Дата возврата:</span>
-                          <span>
-                            {item.dueDate ? formatDisplayDate(item.dueDate) : "—"}
-                          </span>
-                        </div>
+                      <div className="debt-banner-bar" aria-hidden="true">
+                        <div
+                          className="debt-banner-progress"
+                          style={{ width: `${Math.round(progress * 100)}%` }}
+                        />
                       </div>
                     </button>
                   );
@@ -4672,7 +4669,6 @@ function App() {
                       setDebtTab("debts");
                       setDebtDetail(null);
                       setDebtEditor(null);
-                      setDebtScheduleEditor(null);
                       setAccountDetail(null);
                       setIncomeSourceDetail(null);
                       setCategoryDetail(null);
