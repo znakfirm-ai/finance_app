@@ -425,12 +425,6 @@ function App() {
   const [debtDueDate, setDebtDueDate] = useState("");
   const [debtNotes, setDebtNotes] = useState("");
   const [debtCurrencyCode, setDebtCurrencyCode] = useState("RUB");
-  const [debtPaymentFormOpen, setDebtPaymentFormOpen] = useState(false);
-  const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
-  const [debtPaymentDate, setDebtPaymentDate] = useState("");
-  const [debtPaymentAccount, setDebtPaymentAccount] = useState("");
-  const [debtPaymentNote, setDebtPaymentNote] = useState("");
-  const [debtPaymentMessage, setDebtPaymentMessage] = useState("");
   const [debtDeleteOpen, setDebtDeleteOpen] = useState(false);
   const [debtDeleteMode, setDebtDeleteMode] = useState("transfer");
   const [debtDeleteAccount, setDebtDeleteAccount] = useState("");
@@ -649,6 +643,9 @@ function App() {
       });
       const data = await res.json();
       let items = Array.isArray(data) ? data : [];
+      if (accountDetail) {
+        items = items.filter((item) => !item.excludeFromSummary);
+      }
       if (reset) {
         setHistoryItems(items);
       } else {
@@ -659,39 +656,6 @@ function App() {
       setHistoryHasMore(searchQuery ? false : items.length === 50);
     } catch (_) {
       if (reset) setHistoryItems([]);
-      setHistoryHasMore(false);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }
-
-  async function loadDebtPayments() {
-    if (!debtDetail?.id) return;
-    if (historyLoading) return;
-    setHistoryLoading(true);
-    try {
-      const searchQuery = historyQueryDebounced.trim();
-      const params = new URLSearchParams();
-      params.set("limit", "500");
-      if (searchQuery) {
-        params.set("q", searchQuery);
-      }
-      const range = getPeriodRange();
-      if (range) {
-        params.set("from", range.start.toISOString());
-        params.set("to", range.end.toISOString());
-      }
-      const res = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${debtDetail.id}/payments?${params}`)),
-        { headers: authHeaders }
-      );
-      const data = await res.json();
-      const items = Array.isArray(data) ? data : [];
-      setHistoryItems(items);
-      setHistoryBefore(null);
-      setHistoryHasMore(false);
-    } catch (_) {
-      setHistoryItems([]);
       setHistoryHasMore(false);
     } finally {
       setHistoryLoading(false);
@@ -816,31 +780,6 @@ function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [historyQuery]);
-
-  useEffect(() => {
-    if (!debtDetail) return;
-    setDebtPaymentFormOpen(false);
-    setDebtPaymentAmount("");
-    setDebtPaymentNote("");
-    setDebtPaymentMessage("");
-    setDebtPaymentDate(formatDateInput(new Date()));
-    if (accounts.length) {
-      setDebtPaymentAccount(accounts[0].name);
-    }
-  }, [debtDetail?.id, accounts]);
-
-  useEffect(() => {
-    if (!debtDetail) return;
-    loadDebtPayments();
-  }, [
-    debtDetail?.id,
-    historyPeriod,
-    customRange.from,
-    customRange.to,
-    historyQueryDebounced,
-    initData,
-    webUserId,
-  ]);
 
   useEffect(() => {
     const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
@@ -1676,70 +1615,6 @@ function App() {
     }
   }
 
-  async function addDebtPayment() {
-    if (!debtDetail?.id) return;
-    const amount = parseNumberInput(debtPaymentAmount);
-    if (!amount) {
-      setDebtPaymentMessage("Введите сумму");
-      return;
-    }
-    if (accounts.length && !debtPaymentAccount) {
-      setDebtPaymentMessage("Выберите счет");
-      return;
-    }
-    const endpoint = `/api/debts/${debtDetail.id}/payments`;
-    const targetUrl = apiUrl(endpoint);
-    const payload = {
-      amount,
-      account: debtPaymentAccount,
-      date: debtPaymentDate || formatDateInput(new Date()),
-      note: debtPaymentNote || "",
-    };
-    if (webUserId) payload.webUserId = webUserId;
-    if (initData) payload.initData = initData;
-    const postJson = (url, body) =>
-      new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", url, true);
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.onreadystatechange = () => {
-          if (xhr.readyState !== 4) return;
-          const text = xhr.responseText || "";
-          let data = null;
-          try {
-            data = text ? JSON.parse(text) : null;
-          } catch (_) {
-            data = null;
-          }
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(data);
-          } else {
-            reject(new Error(data?.error || text || `HTTP ${xhr.status}`));
-          }
-        };
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.send(JSON.stringify(body));
-      });
-    try {
-      await postJson(targetUrl, payload);
-      setDebtPaymentMessage("Сохранено");
-      setDebtPaymentAmount("");
-      setDebtPaymentNote("");
-      setTimeout(() => setDebtPaymentMessage(""), 2000);
-      setDebtPaymentFormOpen(false);
-      await loadAllDebts();
-      await loadOperations();
-      await loadDebtPayments();
-    } catch (e) {
-      const message = e?.message || "Ошибка";
-      if (/pattern/i.test(message)) {
-        setDebtPaymentMessage(`Ошибка адреса запроса. ${message}. ${targetUrl}`);
-      } else {
-        setDebtPaymentMessage(message);
-      }
-    }
-  }
-
   async function deleteDebt(id) {
     if (!id) return;
     if (debtDeleteMode === "transfer" && accounts.length && !debtDeleteAccount) {
@@ -2159,6 +2034,7 @@ function App() {
       map.set(acc.name, { income: 0, expense: 0 });
     });
     operations.forEach((op) => {
+      if (op.excludeFromSummary) return;
       const acc = op.account || accounts[0]?.name || "Наличные";
       if (!map.has(acc)) return;
       const bucket = map.get(acc);
@@ -2343,8 +2219,6 @@ function App() {
         : debtsOwe;
   const goalPages = Math.max(1, Math.ceil((goalTiles.length + 1) / 4));
   const debtPages = Math.max(1, Math.ceil((debtTiles.length + 1) / 4));
-  const isDebtInterest =
-    incomeSourceDetail?.id && String(incomeSourceDetail.id).startsWith("interest_");
 
   const updateBalanceArrows = () => {
     const el = balanceScrollRef.current;
@@ -2427,18 +2301,6 @@ function App() {
       maximumFractionDigits: 2,
     });
     const symbol = symbolOverride || settings.currencySymbol || "₽";
-    return `${formatted} ${symbol}`;
-  };
-
-  const formatMoneyShort = (value, currencyCode) => {
-    const amount = Number(value || 0);
-    const hasCents = Math.abs(amount % 1) > 0.001;
-    const formatted = amount.toLocaleString("ru-RU", {
-      minimumFractionDigits: hasCents ? 2 : 0,
-      maximumFractionDigits: 2,
-    });
-    const code = String(currencyCode || "").toUpperCase();
-    const symbol = code === "RUB" ? "₽" : currencySymbolByCode(code);
     return `${formatted} ${symbol}`;
   };
 
@@ -3463,150 +3325,6 @@ function App() {
                 )}
               </div>
             </div>
-
-            <div className="row">
-              <input
-                className="input"
-                value={historyQuery}
-                onChange={(e) => setHistoryQuery(e.target.value)}
-                placeholder="Поиск по названию или сумме"
-              />
-              <button
-                className="btn ghost"
-                onClick={() => {
-                  setCustomRangeDraft(customRange);
-                  setShowCustomRange(historyPeriod === "custom");
-                  setShowPeriodSheet(true);
-                }}
-              >
-                Период
-              </button>
-            </div>
-            {periodRangeText && <div className="history-range">{periodRangeText}</div>}
-
-            <button
-              className="btn"
-              onClick={() => {
-                const next = !debtPaymentFormOpen;
-                setDebtPaymentFormOpen(next);
-                if (next) {
-                  setDebtPaymentAmount("");
-                  setDebtPaymentNote("");
-                  setDebtPaymentMessage("");
-                  setDebtPaymentDate(formatDateInput(new Date()));
-                  if (accounts.length) {
-                    setDebtPaymentAccount(accounts[0].name);
-                  }
-                }
-              }}
-            >
-              Добавить платеж
-            </button>
-
-            {debtPaymentFormOpen && (
-              <div className="goal-transfer">
-                <label className="label">Сумма платежа</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  value={debtPaymentAmount}
-                  onChange={(e) => setDebtPaymentAmount(e.target.value)}
-                />
-                <label className="label">Дата платежа</label>
-                <DateSlotPicker
-                  value={debtPaymentDate || formatDateInput(new Date())}
-                  ariaLabel="Дата платежа"
-                  onChange={(value) => setDebtPaymentDate(value)}
-                />
-                <label className="label">Счет</label>
-                {accounts.length ? (
-                  <select
-                    className="select"
-                    value={debtPaymentAccount}
-                    onChange={(e) => setDebtPaymentAccount(e.target.value)}
-                  >
-                    <option value="">Выберите счет</option>
-                    {accounts.map((acc) => (
-                      <option key={acc.id} value={acc.name}>
-                        {acc.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="muted">Нет счетов</div>
-                )}
-                <label className="label">Комментарий</label>
-                <input
-                  className="input"
-                  value={debtPaymentNote}
-                  onChange={(e) => setDebtPaymentNote(e.target.value)}
-                  placeholder="Комментарий"
-                />
-                <button className="btn" onClick={addDebtPayment}>
-                  Сохранить
-                </button>
-                {debtPaymentMessage && (
-                  <div
-                    className={
-                      /ошиб|выберите|введите/i.test(debtPaymentMessage)
-                        ? "error"
-                        : "status success"
-                    }
-                  >
-                    {debtPaymentMessage}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="history-list" ref={historyListRef} onScroll={handleHistoryScroll}>
-              {groupedHistory.length === 0 ? (
-                <div className="muted">Пока нет операций</div>
-              ) : (
-                groupedHistory.map((group) => (
-                  <div key={group.key} className="history-group">
-                    <div className="history-date-row">
-                      <div className="history-date">{group.key}</div>
-                    </div>
-                    <div className="history-rows">
-                      {group.items.map((op) => (
-                        <button
-                          key={op.id}
-                          className="history-row"
-                          onClick={() =>
-                            setOperationEditor({
-                              mode: "edit",
-                              id: op.id,
-                              label: op.label || op.text || "",
-                              amount: op.amount,
-                              account: op.account,
-                              category: op.category || "Прочее",
-                              incomeSource: op.incomeSource || op.category || "",
-                              type: op.type,
-                              date: formatDateInput(
-                                op.createdAt || op.date || op.created_at || ""
-                              ),
-                            })
-                          }
-                        >
-                          <div className="history-row-main">
-                            <span className="history-label">{op.label || op.text}</span>
-                            <span className="history-meta">{getOperationFlowLine(op)}</span>
-                          </div>
-                          <span
-                            className={`history-amount ${op.type === "income" ? "income" : "expense"}`}
-                          >
-                            {formatSignedMoney(op.amount, op.type, settings.currencySymbol)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
             <button
               className="btn ghost"
               onClick={() =>
@@ -3664,24 +3382,11 @@ function App() {
                 <div className="muted">Пока нет записей</div>
               ) : (
                 debtListItems.map((item) => {
-                  const debtCurrencyCode = item.currencyCode || settings.currencyCode || "RUB";
-                  const totalAmount = Number(item.totalAmount || 0);
-                  const remainingAmount = Number(item.remaining || 0);
-                  const progress =
-                    totalAmount > 0
-                      ? Math.max(0, Math.min(1, (totalAmount - remainingAmount) / totalAmount))
-                      : 0;
-                  const toneClass =
-                    item.kind === "owed_to_me" ? "positive" : "negative";
-                  const remainingText = formatMoneyShort(remainingAmount, debtCurrencyCode);
-                  const totalText = formatMoneyShort(totalAmount, debtCurrencyCode);
-                  const dueDateText = item.dueDate
-                    ? `до ${formatDisplayDate(item.dueDate)}`
-                    : "дата возврата —";
+                  const debtCurrencySymbol = currencySymbolByCode(item.currencyCode);
                   return (
                     <button
                       key={item.id}
-                      className={`debt-banner ${toneClass}`}
+                      className="debt-card"
                       onClick={() =>
                         setDebtDetail({
                           ...item,
@@ -3689,24 +3394,29 @@ function App() {
                         })
                       }
                     >
-                      <div className="debt-banner-header">
-                        <span className="debt-banner-name">{item.name}</span>
-                      </div>
-                      <div className="debt-banner-sub">
-                        <span className="debt-banner-label">Остаток по долгу</span>
-                        <span className="debt-banner-value">
-                          {remainingText} / {totalText}
+                      <div className="debt-card-top">
+                        <span className="debt-card-name">{item.name}</span>
+                        <span className="debt-card-amount">
+                          {formatMoney(item.totalAmount, debtCurrencySymbol)}
                         </span>
                       </div>
-                      <div className="debt-banner-bar" aria-hidden="true">
-                        <div
-                          className="debt-banner-progress"
-                          style={{ width: `${Math.round(progress * 100)}%` }}
-                        />
-                      </div>
-                      <div className="debt-banner-foot">
-                        <span className="debt-banner-foot-spacer" />
-                        <span className="debt-banner-foot-date">{dueDateText}</span>
+                      <div className="debt-card-meta">
+                        <div className="debt-card-meta-line">
+                          <span>Сумма займа:</span>
+                          <span>{formatMoney(item.principalAmount, debtCurrencySymbol)}</span>
+                        </div>
+                        <div className="debt-card-meta-line">
+                          <span>Дата выдачи:</span>
+                          <span>
+                            {item.issuedDate ? formatDisplayDate(item.issuedDate) : "—"}
+                          </span>
+                        </div>
+                        <div className="debt-card-meta-line">
+                          <span>Дата возврата:</span>
+                          <span>
+                            {item.dueDate ? formatDisplayDate(item.dueDate) : "—"}
+                          </span>
+                        </div>
                       </div>
                     </button>
                   );
@@ -4746,6 +4456,7 @@ function App() {
                       setDebtTab("debts");
                       setDebtDetail(null);
                       setDebtEditor(null);
+                      setDebtScheduleEditor(null);
                       setAccountDetail(null);
                       setIncomeSourceDetail(null);
                       setCategoryDetail(null);
