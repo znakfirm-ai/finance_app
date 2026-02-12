@@ -2374,6 +2374,15 @@ function App() {
     return `${formatted} ${symbol}`;
   };
 
+  const formatMoneyPlain = (value) => {
+    const amount = Number(value || 0);
+    const hasCents = Math.abs(amount % 1) > 0.001;
+    return amount.toLocaleString("ru-RU", {
+      minimumFractionDigits: hasCents ? 2 : 0,
+      maximumFractionDigits: 2,
+    });
+  };
+
   const formatDisplayDate = (value) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
@@ -3605,6 +3614,8 @@ function App() {
                       : 0;
                   const toneClass =
                     item.kind === "owed_to_me" ? "positive" : "negative";
+                  const remainingText = formatMoneyPlain(remainingAmount);
+                  const totalText = formatMoneyPlain(totalAmount);
                   return (
                     <button
                       key={item.id}
@@ -3619,9 +3630,8 @@ function App() {
                       <div className="debt-banner-header">
                         <span className="debt-banner-name">{item.name}</span>
                         <span className="debt-banner-amount">
-                          <span className="debt-banner-label">Остаток</span>
                           <span className="debt-banner-value">
-                            {formatMoney(remainingAmount, debtCurrencySymbol)}
+                            {remainingText} / {totalText}
                           </span>
                         </span>
                       </div>
