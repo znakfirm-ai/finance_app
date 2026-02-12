@@ -11,6 +11,9 @@ const normalizeApiBase = (value) => {
 
 const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
 const apiUrl = (path) => {
+  if (typeof window !== "undefined" && !import.meta.env.DEV && path.startsWith("/api")) {
+    return path;
+  }
   try {
     const base =
       API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
