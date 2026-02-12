@@ -433,9 +433,13 @@ function App() {
   }, [initData]);
 
   function withWebQuery(path) {
-    if (!webUserId) return path;
+    const params = new URLSearchParams();
+    if (webUserId) params.set("webUserId", webUserId);
+    if (initData) params.set("initData", initData);
+    const query = params.toString();
+    if (!query) return path;
     const joiner = path.includes("?") ? "&" : "?";
-    return `${path}${joiner}webUserId=${encodeURIComponent(webUserId)}`;
+    return `${path}${joiner}${query}`;
   }
 
   async function loadMeta() {
