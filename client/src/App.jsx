@@ -9,11 +9,11 @@ const normalizeApiBase = (value) => {
   return `https://${raw.replace(/\/$/, "")}`;
 };
 
-const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
+const RAW_API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
+const API_BASE = import.meta.env.DEV
+  ? RAW_API_BASE
+  : RAW_API_BASE || "https://finance-app-api-gcnf.onrender.com";
 const apiUrl = (path) => {
-  if (typeof window !== "undefined" && !import.meta.env.DEV && path.startsWith("/api")) {
-    return path;
-  }
   try {
     const base =
       API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
@@ -1688,6 +1688,9 @@ function App() {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", url, true);
         xhr.setRequestHeader("Content-Type", "application/json");
+        if (authHeaders["x-telegram-init-data"]) {
+          xhr.setRequestHeader("x-telegram-init-data", authHeaders["x-telegram-init-data"]);
+        }
         xhr.onreadystatechange = () => {
           if (xhr.readyState !== 4) return;
           const text = xhr.responseText || "";
