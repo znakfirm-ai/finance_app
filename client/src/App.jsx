@@ -10,12 +10,8 @@ const normalizeApiBase = (value) => {
 };
 
 const RAW_API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
-const PROD_API_ORIGIN = "https://finance-app-api-gcnf.onrender.com";
-const API_BASE = import.meta.env.DEV ? RAW_API_BASE : RAW_API_BASE || PROD_API_ORIGIN;
+const API_BASE = RAW_API_BASE;
 const apiUrl = (path) => {
-  if (!import.meta.env.DEV && path.startsWith("/api")) {
-    return `${PROD_API_ORIGIN}${path}`;
-  }
   try {
     const base =
       API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
