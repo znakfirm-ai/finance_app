@@ -3629,10 +3629,11 @@ function App() {
                     >
                       <div className="debt-banner-header">
                         <span className="debt-banner-name">{item.name}</span>
-                        <span className="debt-banner-amount">
-                          <span className="debt-banner-value">
-                            {remainingText} / {totalText}
-                          </span>
+                      </div>
+                      <div className="debt-banner-sub">
+                        <span className="debt-banner-label">Остаток по долгу</span>
+                        <span className="debt-banner-value">
+                          {remainingText} / {totalText}
                         </span>
                       </div>
                       <div className="debt-banner-bar" aria-hidden="true">
