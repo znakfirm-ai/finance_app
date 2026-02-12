@@ -14,7 +14,9 @@ const apiUrl = (path) => {
   try {
     const base =
       API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
-    return new URL(path, base || "http://localhost").toString();
+    const fallback =
+      typeof window !== "undefined" ? window.location.href : "http://localhost";
+    return new URL(path, base || fallback || "http://localhost").toString();
   } catch (_) {
     return API_BASE ? `${API_BASE}${path}` : path;
   }
@@ -1668,6 +1670,8 @@ function App() {
       setDebtPaymentMessage("Выберите счет");
       return;
     }
+    const endpoint = withWebQuery(`/api/debts/${debtDetail.id}/payments`);
+    const targetUrl = apiUrl(endpoint);
     const payload = {
       amount,
       account: debtPaymentAccount,
@@ -1677,14 +1681,11 @@ function App() {
     if (webUserId) payload.webUserId = webUserId;
     if (initData) payload.initData = initData;
     try {
-      const res = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${debtDetail.id}/payments`)),
-        {
+      const res = await fetch(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify(payload),
-        }
-      );
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       setDebtPaymentMessage("Сохранено");
@@ -1696,7 +1697,12 @@ function App() {
       await loadOperations();
       await loadDebtPayments();
     } catch (e) {
-      setDebtPaymentMessage(e.message || "Ошибка");
+      const message = e?.message || "Ошибка";
+      if (/pattern/i.test(message)) {
+        setDebtPaymentMessage(`Ошибка адреса запроса. ${message}. ${targetUrl}`);
+      } else {
+        setDebtPaymentMessage(message);
+      }
     }
   }
 
