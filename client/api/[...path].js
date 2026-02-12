@@ -1,6 +1,6 @@
 const DEFAULT_BASE = "https://finance-app-api-gcnf.onrender.com";
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const base = process.env.API_PROXY_BASE || DEFAULT_BASE;
   const target = `${base.replace(/\/$/, "")}${req.url}`;
 
@@ -35,4 +35,4 @@ module.exports = async function handler(req, res) {
     res.setHeader("content-type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: "Proxy error" }));
   }
-};
+}
