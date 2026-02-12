@@ -11,10 +11,23 @@ const normalizeApiBase = (value) => {
 
 const RAW_API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
 const API_BASE = RAW_API_BASE;
+const isVercelHost = () => {
+  if (typeof window === "undefined") return false;
+  return window.location.hostname.endsWith("vercel.app");
+};
+const shouldUseSameOriginApi = () => {
+  if (import.meta.env.DEV) return false;
+  if (typeof window === "undefined") return false;
+  if (!API_BASE) return true;
+  if (!isVercelHost()) return false;
+  return /onrender\.com$/i.test(API_BASE.replace(/^https?:\/\//i, "").split("/")[0]);
+};
 const apiUrl = (path) => {
   try {
     const base =
-      API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
+      (path.startsWith("/api") && shouldUseSameOriginApi()
+        ? window.location.origin
+        : API_BASE) || (typeof window !== "undefined" ? window.location.origin : "");
     const fallback =
       typeof window !== "undefined" ? window.location.href : "http://localhost";
     return new URL(path, base || fallback || "http://localhost").toString();

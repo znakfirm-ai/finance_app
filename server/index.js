@@ -5343,16 +5343,35 @@ app.get("/api/meta", async (req, res) => {
     const accountsList = owner?.ownerId
       ? await getAccountsForOwner(owner.ownerId)
       : defaultAccounts.map((name, index) => ({ id: `acc_default_${index}`, name }));
+    const build = {
+      commit:
+        process.env.RENDER_GIT_COMMIT ||
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        process.env.GITHUB_SHA ||
+        process.env.COMMIT_SHA ||
+        null,
+      serviceId: process.env.RENDER_SERVICE_ID || null,
+      deployment:
+        process.env.RENDER_DEPLOYMENT_ID ||
+        process.env.VERCEL_DEPLOYMENT_ID ||
+        null,
+      env:
+        (process.env.RENDER && "render") ||
+        (process.env.VERCEL && "vercel") ||
+        null,
+    };
     res.json({
       accounts: accountsList.map((acc) => acc.name),
       currencyOptions,
       defaultCategories: defaultCategories.map((c) => c.name),
+      build,
     });
   } catch (err) {
     res.json({
       accounts: defaultAccounts,
       currencyOptions,
       defaultCategories: defaultCategories.map((c) => c.name),
+      build: { commit: null, serviceId: null, deployment: null, env: null },
     });
   }
 });
