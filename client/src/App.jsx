@@ -1685,7 +1685,6 @@ function App() {
       return;
     }
     const endpoint = `/api/debts/${debtDetail.id}/payments`;
-    const targetUrl = apiUrl(endpoint);
     const payload = {
       amount,
       account: debtPaymentAccount,
@@ -1694,34 +1693,14 @@ function App() {
     };
     if (webUserId) payload.webUserId = webUserId;
     if (initData) payload.initData = initData;
-    const postJson = (url, body) =>
-      new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", url, true);
-        xhr.setRequestHeader("Content-Type", "application/json");
-        if (authHeaders["x-telegram-init-data"]) {
-          xhr.setRequestHeader("x-telegram-init-data", authHeaders["x-telegram-init-data"]);
-        }
-        xhr.onreadystatechange = () => {
-          if (xhr.readyState !== 4) return;
-          const text = xhr.responseText || "";
-          let data = null;
-          try {
-            data = text ? JSON.parse(text) : null;
-          } catch (_) {
-            data = null;
-          }
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(data);
-          } else {
-            reject(new Error(data?.error || text || `HTTP ${xhr.status}`));
-          }
-        };
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.send(JSON.stringify(body));
-      });
     try {
-      await postJson(targetUrl, payload);
+      const res = await fetch(apiUrl(withWebQuery(endpoint)), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Ошибка");
       setDebtPaymentMessage("Сохранено");
       setDebtPaymentAmount("");
       setDebtPaymentNote("");
@@ -1731,12 +1710,7 @@ function App() {
       await loadOperations();
       await loadDebtPayments();
     } catch (e) {
-      const message = e?.message || "Ошибка";
-      if (/pattern/i.test(message)) {
-        setDebtPaymentMessage(`Ошибка адреса запроса. ${message}. ${targetUrl}`);
-      } else {
-        setDebtPaymentMessage(message);
-      }
+      setDebtPaymentMessage(e?.message || "Ошибка");
     }
   }
 
