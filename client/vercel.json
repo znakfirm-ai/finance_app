@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://finance-app-api-gcnf.onrender.com/api/:path*"
+    }
+  ]
+}
