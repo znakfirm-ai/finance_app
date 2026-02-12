@@ -2382,7 +2382,7 @@ function App() {
       maximumFractionDigits: 2,
     });
     const code = String(currencyCode || "").toUpperCase();
-    const symbol = code === "RUB" ? "Р" : currencySymbolByCode(code);
+    const symbol = code === "RUB" ? "₽" : currencySymbolByCode(code);
     return `${formatted} ${symbol}`;
   };
 
