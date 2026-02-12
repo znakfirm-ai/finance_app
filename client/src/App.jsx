@@ -382,26 +382,12 @@ function App() {
   const [debtTab, setDebtTab] = useState("debts");
   const [debtDetail, setDebtDetail] = useState(null);
   const [debtEditor, setDebtEditor] = useState(null);
-  const [debtScheduleItems, setDebtScheduleItems] = useState([]);
-  const [debtScheduleEditor, setDebtScheduleEditor] = useState(null);
-  const [debtSearch, setDebtSearch] = useState("");
-  const [debtSearchDebounced, setDebtSearchDebounced] = useState("");
-  const [debtScheduleMessage, setDebtScheduleMessage] = useState("");
   const [debtEditorMessage, setDebtEditorMessage] = useState("");
-  const [debtScheduleAmount, setDebtScheduleAmount] = useState("");
-  const [debtScheduleDate, setDebtScheduleDate] = useState("");
-  const [debtScheduleNote, setDebtScheduleNote] = useState("");
   const [debtName, setDebtName] = useState("");
   const [debtPrincipal, setDebtPrincipal] = useState("");
   const [debtTotal, setDebtTotal] = useState("");
   const [debtIssuedDate, setDebtIssuedDate] = useState("");
   const [debtDueDate, setDebtDueDate] = useState("");
-  const [debtRate, setDebtRate] = useState("");
-  const [debtTermMonths, setDebtTermMonths] = useState("");
-  const [debtPaymentType, setDebtPaymentType] = useState("annuity");
-  const [debtPaymentsCount, setDebtPaymentsCount] = useState("");
-  const [debtScheduleEnabled, setDebtScheduleEnabled] = useState(true);
-  const [debtFrequency, setDebtFrequency] = useState("monthly");
   const [debtNotes, setDebtNotes] = useState("");
   const [debtCurrencyCode, setDebtCurrencyCode] = useState("RUB");
   const [debtDeleteOpen, setDebtDeleteOpen] = useState(false);
@@ -409,11 +395,6 @@ function App() {
   const [debtDeleteAccount, setDebtDeleteAccount] = useState("");
   const [debtDeleteMessage, setDebtDeleteMessage] = useState("");
   const [debtDeleteTarget, setDebtDeleteTarget] = useState(null);
-  const [debtPaymentConfirm, setDebtPaymentConfirm] = useState(null);
-  const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
-  const [debtPaymentAccount, setDebtPaymentAccount] = useState("");
-  const [debtPaymentIncomeSource, setDebtPaymentIncomeSource] = useState("");
-  const [debtPaymentError, setDebtPaymentError] = useState("");
   const [goalTransfer, setGoalTransfer] = useState(null);
   const [goalTransferAmount, setGoalTransferAmount] = useState("");
   const [goalTransferAccount, setGoalTransferAccount] = useState("");
@@ -427,7 +408,6 @@ function App() {
   const [historyQuery, setHistoryQuery] = useState("");
   const [historyQueryDebounced, setHistoryQueryDebounced] = useState("");
   const [historyPeriod, setHistoryPeriod] = useState("month");
-  const debtHistoryPrevRef = useRef(null);
   const [customRange, setCustomRange] = useState({ from: "", to: "" });
   const [customRangeDraft, setCustomRangeDraft] = useState({ from: "", to: "" });
   const [showPeriodSheet, setShowPeriodSheet] = useState(false);
@@ -475,77 +455,6 @@ function App() {
     setDebtDeleteMessage("");
   };
 
-  const openDebtPaymentConfirm = (entry, debt) => {
-    if (!entry || !debt?.id) return;
-    if (entry.paid) return;
-    const accountName = accounts[0]?.name || "";
-    const alreadyPaid = Number(entry.paidAmount || 0);
-    const remaining = Math.max(0, Number(entry.amount || 0) - alreadyPaid);
-    const interestTotal = Math.max(
-      0,
-      Number(debt.totalAmount || 0) - Number(debt.principalAmount || 0)
-    );
-    const pickIncomeSource = () => {
-      if (!interestTotal) return "";
-      const preferred = ["Инвестиции по займам", "Проценты по займам", "Инвестиции"];
-      const names = incomeSources.map((src) => src.name);
-      const match = preferred
-        .map((label) =>
-          names.find((name) => String(name).toLowerCase() === label.toLowerCase())
-        )
-        .find(Boolean);
-      return match || names[0] || "";
-    };
-    setDebtPaymentConfirm({ entry, debt });
-    setDebtPaymentAmount(String(remaining || ""));
-    setDebtPaymentAccount(accountName);
-    setDebtPaymentIncomeSource(pickIncomeSource());
-    setDebtPaymentError("");
-  };
-
-  const closeDebtPaymentConfirm = () => {
-    setDebtPaymentConfirm(null);
-    setDebtPaymentAmount("");
-    setDebtPaymentAccount("");
-    setDebtPaymentIncomeSource("");
-    setDebtPaymentError("");
-  };
-
-  const buildDebtScheduleSplits = (debt, scheduleItems) => {
-    if (!debt || !Array.isArray(scheduleItems) || scheduleItems.length === 0) return null;
-    const principalTotal = Math.max(0, Number(debt.principalAmount || 0));
-    const totalAmount = Math.max(0, Number(debt.totalAmount || 0));
-    const interestTotal = Math.max(0, totalAmount - principalTotal);
-    if (totalAmount <= 0 || principalTotal <= 0) return null;
-    const ordered = scheduleItems
-      .slice()
-      .sort((a, b) => {
-        const aDate = new Date(a.dueDate || a.createdAt || 0).getTime();
-        const bDate = new Date(b.dueDate || b.createdAt || 0).getTime();
-        return aDate - bDate;
-      });
-    const count = ordered.length;
-    if (!count) return null;
-    const basePrincipal = principalTotal / count;
-    const baseInterest = interestTotal / count;
-    let remainingPrincipal = principalTotal;
-    let remainingInterest = interestTotal;
-    const splits = new Map();
-    ordered.forEach((entry, idx) => {
-      let principalPart = idx === count - 1 ? remainingPrincipal : roundMoney(basePrincipal);
-      let interestPart = idx === count - 1 ? remainingInterest : roundMoney(baseInterest);
-      if (principalPart > remainingPrincipal) principalPart = remainingPrincipal;
-      if (interestPart > remainingInterest) interestPart = remainingInterest;
-      remainingPrincipal = roundMoney(remainingPrincipal - principalPart);
-      remainingInterest = roundMoney(remainingInterest - interestPart);
-      splits.set(entry.id, {
-        principal: principalPart,
-        interest: interestPart,
-        amount: Number(entry.amount || 0),
-      });
-    });
-    return splits;
-  };
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -805,7 +714,6 @@ function App() {
       setDebtSection(null);
       setDebtDetail(null);
       setDebtEditor(null);
-      setDebtScheduleEditor(null);
     }
   }, [view]);
 
@@ -817,8 +725,6 @@ function App() {
     setHistoryHasMore(true);
     setHistoryQuery("");
     setHistoryQueryDebounced("");
-    setDebtSearch("");
-    setDebtSearchDebounced("");
     setHistoryPeriod("month");
     setCustomRange({ from: "", to: "" });
     setCustomRangeDraft({ from: "", to: "" });
@@ -839,38 +745,6 @@ function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [historyQuery]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebtSearchDebounced(debtSearch.trim());
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [debtSearch]);
-
-  useEffect(() => {
-    if (!debtDetail) return;
-    loadDebtSchedule(debtDetail.id);
-  }, [
-    debtDetail?.id,
-    debtSearchDebounced,
-    historyPeriod,
-    customRange.from,
-    customRange.to,
-    initData,
-    webUserId,
-  ]);
-
-  useEffect(() => {
-    if (debtDetail && debtHistoryPrevRef.current === null) {
-      debtHistoryPrevRef.current = historyPeriod;
-      setHistoryPeriod("all");
-      return;
-    }
-    if (!debtDetail && debtHistoryPrevRef.current !== null) {
-      setHistoryPeriod(debtHistoryPrevRef.current);
-      debtHistoryPrevRef.current = null;
-    }
-  }, [debtDetail, historyPeriod]);
 
   useEffect(() => {
     const target = accountDetail || incomeSourceDetail || categoryDetail || goalDetail;
@@ -984,12 +858,6 @@ function App() {
       setDebtTotal("");
       setDebtIssuedDate(defaultDate);
       setDebtDueDate(defaultDate);
-    setDebtRate("");
-    setDebtTermMonths("");
-      setDebtPaymentType("annuity");
-      setDebtPaymentsCount("");
-      setDebtScheduleEnabled(true);
-      setDebtFrequency("monthly");
       setDebtNotes("");
       setDebtCurrencyCode(settings.currencyCode || "RUB");
       return;
@@ -1012,41 +880,9 @@ function App() {
     setDebtDueDate(
       debtEditor.dueDate ? formatDateInput(debtEditor.dueDate) : fallbackDate
     );
-    setDebtRate(
-      debtEditor.rate !== null && debtEditor.rate !== undefined ? String(debtEditor.rate) : ""
-    );
-    setDebtTermMonths(
-      debtEditor.termMonths !== null && debtEditor.termMonths !== undefined
-        ? String(debtEditor.termMonths)
-        : ""
-    );
-    setDebtPaymentType(debtEditor.paymentType || "annuity");
-    setDebtPaymentsCount(
-      debtEditor.paymentsCount !== null && debtEditor.paymentsCount !== undefined
-        ? String(debtEditor.paymentsCount)
-        : ""
-    );
-    setDebtScheduleEnabled(debtEditor.scheduleEnabled !== false);
-    setDebtFrequency(debtEditor.frequency || "monthly");
     setDebtNotes(debtEditor.notes || "");
     setDebtCurrencyCode(debtEditor.currencyCode || settings.currencyCode || "RUB");
   }, [debtEditor?.id, debtEditor?.mode, debtEditor?.name]);
-
-  useEffect(() => {
-    if (!debtScheduleEditor) return;
-    setDebtScheduleMessage("");
-    setDebtScheduleAmount(
-      debtScheduleEditor.amount !== null && debtScheduleEditor.amount !== undefined
-        ? String(debtScheduleEditor.amount)
-        : ""
-    );
-    setDebtScheduleDate(
-      debtScheduleEditor.dueDate
-        ? formatDateInput(debtScheduleEditor.dueDate)
-        : formatDateInput(new Date())
-    );
-    setDebtScheduleNote(debtScheduleEditor.note || "");
-  }, [debtScheduleEditor?.id, debtScheduleEditor?.mode]);
 
   useEffect(() => {
     if (!goalDetail) return;
@@ -1636,63 +1472,41 @@ function App() {
     }
   }
 
-  async function loadDebtSchedule(debtId) {
-    if (!debtId) return;
-    try {
-      const params = new URLSearchParams();
-      params.set("limit", "500");
-      if (debtSearchDebounced.trim()) {
-        params.set("q", debtSearchDebounced.trim());
-      }
-      const range = getPeriodRange();
-      if (range) {
-        params.set("from", range.start.toISOString());
-        params.set("to", range.end.toISOString());
-      }
-      const res = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${debtId}/schedule?${params.toString()}`)),
-        { headers: authHeaders }
-      );
-      const data = await res.json();
-      setDebtScheduleItems(Array.isArray(data) ? data : []);
-    } catch (_) {
-      setDebtScheduleItems([]);
-    }
-  }
-
   async function createDebt() {
     const name = debtName.trim();
     if (!name) {
-      setDebtEditorMessage("Введите название");
+      setDebtEditorMessage("Укажите имя");
       return;
     }
-    const isOwed = debtEditor?.kind === "owed_to_me";
-    const issuedDateValue = debtIssuedDate || formatDateInput(new Date());
-    const dueDateValue = debtDueDate || formatDateInput(new Date());
-    if (isOwed && debtScheduleEnabled && (!issuedDateValue || !dueDateValue)) {
-      setDebtEditorMessage("Укажи дату выдачи и дату возврата");
+    const issuedDateValue = debtIssuedDate || "";
+    if (!issuedDateValue) {
+      setDebtEditorMessage("Укажите дату выдачи");
       return;
     }
-    const principalAmount = parseNumberInput(debtPrincipal) ?? 0;
-    const totalAmount = parseNumberInput(debtTotal) ?? 0;
-    const rate = parseNumberInput(debtRate);
-    const termMonths = parseNumberInput(debtTermMonths);
-    const paymentsCount = parseNumberInput(debtPaymentsCount);
+    const principalAmount = parseNumberInput(debtPrincipal);
+    if (!principalAmount) {
+      setDebtEditorMessage("Укажите сумму займа");
+      return;
+    }
+    const totalAmount = parseNumberInput(debtTotal);
+    if (!totalAmount) {
+      setDebtEditorMessage("Укажите сумму к возврату");
+      return;
+    }
+    if (!debtCurrencyCode) {
+      setDebtEditorMessage("Укажите валюту");
+      return;
+    }
     const payload = {
       kind: debtEditor?.kind,
       name,
       principalAmount,
       totalAmount,
-      issuedDate: issuedDateValue || null,
-      dueDate: dueDateValue || null,
-      rate: rate ?? null,
-      termMonths: termMonths ?? null,
-      paymentType: debtPaymentType,
-      paymentsCount: paymentsCount ?? null,
-      scheduleEnabled: debtScheduleEnabled,
-      frequency: debtFrequency,
+      issuedDate: issuedDateValue,
+      dueDate: debtDueDate || null,
       notes: debtNotes || "",
-      currencyCode: debtCurrencyCode || null,
+      currencyCode: debtCurrencyCode,
+      scheduleEnabled: false,
     };
     if (webUserId) payload.webUserId = webUserId;
     if (initData) payload.initData = initData;
@@ -1705,11 +1519,8 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       await loadAllDebts();
-      if (data?.id) {
-        await loadDebtSchedule(data.id);
-        setDebtDetail({ ...data, kind: data.kind || debtEditor?.kind });
-      }
       setDebtEditor(null);
+      setDebtDetail(null);
     } catch (e) {
       setDebtEditorMessage(e.message || "Ошибка");
     }
@@ -1718,36 +1529,38 @@ function App() {
   async function updateDebt(id) {
     const name = debtName.trim();
     if (!name) {
-      setDebtEditorMessage("Введите название");
+      setDebtEditorMessage("Укажите имя");
       return;
     }
-    const isOwed = debtEditor?.kind === "owed_to_me";
-    const issuedDateValue = debtIssuedDate || formatDateInput(new Date());
-    const dueDateValue = debtDueDate || formatDateInput(new Date());
-    if (isOwed && debtScheduleEnabled && (!issuedDateValue || !dueDateValue)) {
-      setDebtEditorMessage("Укажи дату выдачи и дату возврата");
+    const issuedDateValue = debtIssuedDate || "";
+    if (!issuedDateValue) {
+      setDebtEditorMessage("Укажите дату выдачи");
       return;
     }
-    const principalAmount = parseNumberInput(debtPrincipal) ?? 0;
-    const totalAmount = parseNumberInput(debtTotal) ?? 0;
-    const rate = parseNumberInput(debtRate);
-    const termMonths = parseNumberInput(debtTermMonths);
-    const paymentsCount = parseNumberInput(debtPaymentsCount);
+    const principalAmount = parseNumberInput(debtPrincipal);
+    if (!principalAmount) {
+      setDebtEditorMessage("Укажите сумму займа");
+      return;
+    }
+    const totalAmount = parseNumberInput(debtTotal);
+    if (!totalAmount) {
+      setDebtEditorMessage("Укажите сумму к возврату");
+      return;
+    }
+    if (!debtCurrencyCode) {
+      setDebtEditorMessage("Укажите валюту");
+      return;
+    }
     const payload = {
       kind: debtEditor?.kind,
       name,
       principalAmount,
       totalAmount,
-      issuedDate: issuedDateValue || null,
-      dueDate: dueDateValue || null,
-      rate: rate ?? null,
-      termMonths: termMonths ?? null,
-      paymentType: debtPaymentType,
-      paymentsCount: paymentsCount ?? null,
-      scheduleEnabled: debtScheduleEnabled,
-      frequency: debtFrequency,
+      issuedDate: issuedDateValue,
+      dueDate: debtDueDate || null,
       notes: debtNotes || "",
-      currencyCode: debtCurrencyCode || null,
+      currencyCode: debtCurrencyCode,
+      scheduleEnabled: false,
     };
     if (webUserId) payload.webUserId = webUserId;
     if (initData) payload.initData = initData;
@@ -1760,11 +1573,8 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Ошибка");
       await loadAllDebts();
-      if (debtDetail?.id === id) {
-        setDebtDetail({ ...debtDetail, ...data });
-      }
-      setDebtEditorMessage("Сохранено");
-      setTimeout(() => setDebtEditorMessage(""), 2000);
+      setDebtEditor(null);
+      setDebtDetail(null);
     } catch (e) {
       setDebtEditorMessage(e.message || "Ошибка");
     }
@@ -1801,272 +1611,6 @@ function App() {
       setDebtDeleteMessage("");
     } catch (e) {
       setDebtDeleteMessage(e.message || "Ошибка");
-    }
-  }
-
-  async function addDebtScheduleEntry(debtId) {
-    const amount = parseNumberInput(debtScheduleAmount);
-    if (!amount) {
-      setDebtScheduleMessage("Введите сумму");
-      return;
-    }
-    const payload = {
-      amount,
-      dueDate: debtScheduleDate || null,
-      note: debtScheduleNote || "",
-    };
-    if (webUserId) payload.webUserId = webUserId;
-    if (initData) payload.initData = initData;
-    try {
-      const res = await fetch(apiUrl(withWebQuery(`/api/debts/${debtId}/schedule`)), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Ошибка");
-      setDebtScheduleAmount("");
-      setDebtScheduleNote("");
-      await loadDebtSchedule(debtId);
-      await loadAllDebts();
-    } catch (e) {
-      setDebtScheduleMessage(e.message || "Ошибка");
-    }
-  }
-
-  async function updateDebtScheduleEntry(entry) {
-    if (!entry?.debtId || !entry?.id) return;
-    const amount = parseNumberInput(debtScheduleAmount);
-    if (!amount) {
-      setDebtScheduleMessage("Введите сумму");
-      return;
-    }
-    const payload = {
-      amount,
-      dueDate: debtScheduleDate || null,
-      note: debtScheduleNote || "",
-      paid: entry.paid === true,
-      paidAmount: entry.paidAmount ?? null,
-    };
-    if (webUserId) payload.webUserId = webUserId;
-    if (initData) payload.initData = initData;
-    try {
-      const res = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${entry.debtId}/schedule/${entry.id}`)),
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(payload),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Ошибка");
-      setDebtScheduleEditor(null);
-      await loadDebtSchedule(entry.debtId);
-      await loadAllDebts();
-    } catch (e) {
-      setDebtScheduleMessage(e.message || "Ошибка");
-    }
-  }
-
-  async function toggleDebtSchedulePaid(entry, paid) {
-    if (!entry?.debtId || !entry?.id) return;
-    const payload = {
-      amount: entry.amount,
-      dueDate: entry.dueDate || null,
-      note: entry.note || "",
-      paid,
-      paidAmount: paid ? entry.amount : null,
-    };
-    if (webUserId) payload.webUserId = webUserId;
-    if (initData) payload.initData = initData;
-    try {
-      const res = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${entry.debtId}/schedule/${entry.id}`)),
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(payload),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Ошибка");
-      await loadDebtSchedule(entry.debtId);
-      await loadAllDebts();
-    } catch (_) {}
-  }
-
-  async function confirmDebtPayment() {
-    if (!debtPaymentConfirm?.entry || !debtPaymentConfirm?.debt?.id) return;
-    const entry = debtPaymentConfirm.entry;
-    const debt = debtPaymentConfirm.debt;
-    const amount = parseNumberInput(debtPaymentAmount);
-    const entryPaidAmount = Number(entry.paidAmount || 0);
-    if (!amount || amount <= 0) {
-      setDebtPaymentError("Введите сумму");
-      return;
-    }
-    setDebtPaymentError("");
-    if (!debtPaymentAccount) {
-      setDebtPaymentError("Выберите счет");
-      return;
-    }
-    const interestTotal = Math.max(
-      0,
-      Number(debt.totalAmount || 0) - Number(debt.principalAmount || 0)
-    );
-    if (interestTotal > 0 && !debtPaymentIncomeSource) {
-      setDebtPaymentError("Выберите источник дохода для процентов");
-      return;
-    }
-    const scheduleSplits = buildDebtScheduleSplits(debt, debtScheduleItems);
-    const entrySplit = scheduleSplits?.get(entry.id);
-    const plannedInterest = entrySplit ? Number(entrySplit.interest || 0) : 0;
-    const interestPaidSoFar = Number(entry.interestPaid || 0);
-    const interestRemaining = Math.max(0, plannedInterest - interestPaidSoFar);
-    const interestPart = interestTotal > 0 ? Math.min(amount, interestRemaining) : 0;
-    const principalPart = roundMoney(amount - interestPart);
-    let resolvedIncomeSource = debtPaymentIncomeSource;
-    if (interestPart > 0 && resolvedIncomeSource) {
-      const existingSource = incomeSources.find(
-        (src) =>
-          String(src.name).toLowerCase() === String(resolvedIncomeSource).toLowerCase()
-      );
-      if (!existingSource) {
-        try {
-          const payload = { name: resolvedIncomeSource };
-          if (webUserId) payload.webUserId = webUserId;
-          if (initData) payload.initData = initData;
-          const res = await fetch(apiUrl(withWebQuery("/api/income-sources")), {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders },
-            body: JSON.stringify(payload),
-          });
-          const data = await res.json();
-          if (res.ok && data?.name) {
-            setIncomeSources((prev) => [...prev, data]);
-            resolvedIncomeSource = data.name;
-          }
-        } catch (_) {}
-      } else {
-        resolvedIncomeSource = existingSource.name;
-      }
-    }
-
-    const operationsToCreate = [];
-    if (principalPart > 0) {
-      operationsToCreate.push({
-        type: debt.kind === "owed_to_me" ? "income" : "expense",
-        amount: principalPart,
-        account: debtPaymentAccount,
-        label: `Платеж по долгу: ${debt.name}`,
-        category: "Долги",
-        forceIncomeSourceNull: true,
-        sourceType: "debt_principal",
-        sourceId: debt.id,
-      });
-    }
-    if (interestPart > 0) {
-      operationsToCreate.push({
-        type: "income",
-        amount: interestPart,
-        account: debtPaymentAccount,
-        label: `Проценты по долгу: ${debt.name}`,
-        category: resolvedIncomeSource,
-        incomeSource: resolvedIncomeSource,
-        sourceType: "debt_interest",
-        sourceId: debt.id,
-      });
-    }
-
-    const createdOperationIds = [];
-    try {
-      for (const opPayload of operationsToCreate) {
-        if (webUserId) opPayload.webUserId = webUserId;
-        if (initData) opPayload.initData = initData;
-        const opRes = await fetch(apiUrl(withWebQuery("/api/operations")), {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(opPayload),
-        });
-        const opData = await opRes.json();
-        if (!opRes.ok) throw new Error(opData?.error || "Ошибка операции");
-        if (opData?.id) createdOperationIds.push(opData.id);
-      }
-
-      const nextPaidAmount = roundMoney(entryPaidAmount + amount);
-      const fullyPaid = nextPaidAmount >= Number(entry.amount || 0);
-      const nextPrincipalPaid = roundMoney(Number(entry.principalPaid || 0) + principalPart);
-      const nextInterestPaid = roundMoney(Number(entry.interestPaid || 0) + interestPart);
-      const updatePayload = {
-        amount: entry.amount,
-        dueDate: entry.dueDate || null,
-        note: entry.note || "",
-        paid: fullyPaid,
-        paidAmount: nextPaidAmount,
-        principalPaid: nextPrincipalPaid,
-        interestPaid: nextInterestPaid,
-        paidAccount: debtPaymentAccount,
-      };
-      if (webUserId) updatePayload.webUserId = webUserId;
-      if (initData) updatePayload.initData = initData;
-      const scheduleRes = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${entry.debtId}/schedule/${entry.id}`)),
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(updatePayload),
-        }
-      );
-      const scheduleData = await scheduleRes.json();
-      if (!scheduleRes.ok) throw new Error(scheduleData?.error || "Ошибка платежа");
-
-      closeDebtPaymentConfirm();
-      await loadDebtSchedule(entry.debtId);
-      await loadAllDebts();
-      await loadOperations();
-      await loadHistory(true);
-    } catch (e) {
-      setDebtPaymentError(e.message || "Ошибка");
-      if (createdOperationIds.length) {
-        for (const id of createdOperationIds) {
-          try {
-            const payload = {};
-            if (webUserId) payload.webUserId = webUserId;
-            if (initData) payload.initData = initData;
-            await fetch(apiUrl(withWebQuery(`/api/operations/${id}`)), {
-              method: "DELETE",
-              headers: { "Content-Type": "application/json", ...authHeaders },
-              body: JSON.stringify(payload),
-            });
-          } catch (_) {}
-        }
-      }
-    }
-  }
-
-  async function deleteDebtScheduleEntry(entry) {
-    if (!entry?.debtId || !entry?.id) return;
-    if (!confirm("Удалить платеж?")) return;
-    try {
-      const payload = {};
-      if (webUserId) payload.webUserId = webUserId;
-      if (initData) payload.initData = initData;
-      const res = await fetch(
-        apiUrl(withWebQuery(`/api/debts/${entry.debtId}/schedule/${entry.id}`)),
-        {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(payload),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Ошибка");
-      setDebtScheduleEditor(null);
-      await loadDebtSchedule(entry.debtId);
-      await loadAllDebts();
-    } catch (e) {
-      setDebtScheduleMessage(e.message || "Ошибка");
     }
   }
 
@@ -2590,47 +2134,6 @@ function App() {
     });
     return groups;
   }, [filteredHistory]);
-
-  const debtScheduleFiltered = useMemo(() => {
-    let items = debtScheduleItems;
-    if (debtSearchDebounced) {
-      const q = debtSearchDebounced.toLowerCase();
-      items = items.filter((item) => {
-        const note = String(item.note || "").toLowerCase();
-        const amount = String(item.amount || "");
-        return note.includes(q) || amount.includes(q);
-      });
-    }
-    if (periodRange) {
-      items = items.filter((item) => {
-        const date = new Date(item.dueDate || item.createdAt || item.created_at);
-        if (Number.isNaN(date.getTime())) return true;
-        return date >= periodRange.start && date <= periodRange.end;
-      });
-    }
-    return items;
-  }, [debtScheduleItems, debtSearchDebounced, periodRange]);
-
-  const debtScheduleGroups = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat("ru-RU", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
-    const groups = [];
-    let currentKey = null;
-    debtScheduleFiltered.forEach((item) => {
-      const date = new Date(item.dueDate || item.createdAt || item.created_at);
-      const key = Number.isNaN(date.getTime()) ? "Без даты" : fmt.format(date);
-      if (key !== currentKey) {
-        currentKey = key;
-        groups.push({ key, items: [item] });
-      } else {
-        groups[groups.length - 1].items.push(item);
-      }
-    });
-    return groups;
-  }, [debtScheduleFiltered]);
 
   const accountPages = Math.max(1, Math.ceil(accountTiles.length / 4));
   const incomePages = Math.max(1, Math.ceil(incomeSourceTotals.length / 4));
@@ -3668,14 +3171,12 @@ function App() {
             </button>
           </div>
           <div className="account-edit-panel">
-            <label className="label">
-              {debtEditor.kind === "credit" ? "Кредитор" : "Имя / Компания"}
-            </label>
+            <label className="label">Имя / Компания</label>
             <input
               className="input"
               value={debtName}
               onChange={(e) => setDebtName(e.target.value)}
-              placeholder="Например: Альфа Банк"
+              placeholder="Например: Роман"
             />
             <label className="label">Дата выдачи</label>
             <DateSlotPicker
@@ -3683,76 +3184,28 @@ function App() {
               ariaLabel="Дата выдачи"
               onChange={(value) => setDebtIssuedDate(value)}
             />
-            {debtEditor.kind === "credit" ? (
-              <>
-                <label className="label">Сумма кредита</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  value={debtPrincipal}
-                  onChange={(e) => setDebtPrincipal(e.target.value)}
-                />
-                <label className="label">Тип платежей</label>
-                <select
-                  className="select"
-                  value={debtPaymentType}
-                  onChange={(e) => setDebtPaymentType(e.target.value)}
-                >
-                  <option value="annuity">Аннуитет</option>
-                  <option value="diff">Дифференц.</option>
-                </select>
-              </>
-            ) : (
-              <>
-                <label className="label">Сумма займа</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  value={debtPrincipal}
-                  onChange={(e) => setDebtPrincipal(e.target.value)}
-                />
-                <label className="label">Сумма к возврату</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  value={debtTotal}
-                  onChange={(e) => setDebtTotal(e.target.value)}
-                />
-                <label className="label">Дата возврата</label>
-                <DateSlotPicker
-                  value={debtDueDate || formatDateInput(new Date())}
-                  ariaLabel="Дата возврата"
-                  onChange={(value) => setDebtDueDate(value)}
-                />
-                <label className="label">График платежей</label>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={debtScheduleEnabled}
-                    onChange={(e) => setDebtScheduleEnabled(e.target.checked)}
-                  />
-                  <span>Включить график</span>
-                </label>
-                {debtScheduleEnabled && (
-                  <>
-                    <label className="label">Периодичность</label>
-                    <select
-                      className="select"
-                      value={debtFrequency}
-                      onChange={(e) => setDebtFrequency(e.target.value)}
-                    >
-                      <option value="daily">Каждый день</option>
-                      <option value="monthly">Каждый месяц</option>
-                      <option value="weekly">Каждую неделю</option>
-                      <option value="quarterly">Каждый квартал</option>
-                    </select>
-                  </>
-                )}
-              </>
-            )}
+            <label className="label">Сумма займа</label>
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={debtPrincipal}
+              onChange={(e) => setDebtPrincipal(e.target.value)}
+            />
+            <label className="label">Сумма к возврату</label>
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              value={debtTotal}
+              onChange={(e) => setDebtTotal(e.target.value)}
+            />
+            <label className="label">Дата возврата</label>
+            <DateSlotPicker
+              value={debtDueDate || formatDateInput(new Date())}
+              ariaLabel="Дата возврата"
+              onChange={(value) => setDebtDueDate(value)}
+            />
             <label className="label">Валюта</label>
             <select
               className="select"
@@ -3806,77 +3259,7 @@ function App() {
         return <section className="overview-shell">{debtEditorView}</section>;
       }
 
-      if (debtScheduleEditor) {
-        return (
-          <section className="overview-shell">
-            <div className="overview-manage-header">
-              <div className="overview-manage-title">Платеж</div>
-              <button className="btn ghost" onClick={() => setDebtScheduleEditor(null)}>
-                Закрыть
-              </button>
-            </div>
-            <label className="label">Дата платежа</label>
-            <DateSlotPicker
-              value={debtScheduleDate || formatDateInput(new Date())}
-              ariaLabel="Дата платежа"
-              onChange={(value) => setDebtScheduleDate(value)}
-            />
-            <label className="label">Сумма</label>
-            <input
-              className="input"
-              type="number"
-              step="0.01"
-              value={debtScheduleAmount}
-              onChange={(e) => setDebtScheduleAmount(e.target.value)}
-            />
-            <label className="label">Комментарий</label>
-            <input
-              className="input"
-              value={debtScheduleNote}
-              onChange={(e) => setDebtScheduleNote(e.target.value)}
-              placeholder="Например: Платеж"
-            />
-            <div className="row">
-              <button
-                className="btn"
-                onClick={() =>
-                  debtScheduleEditor.mode === "create"
-                    ? addDebtScheduleEntry(debtScheduleEditor.debtId)
-                    : updateDebtScheduleEntry(debtScheduleEditor)
-                }
-              >
-                Сохранить
-              </button>
-              {debtScheduleEditor.mode === "edit" && (
-                <button
-                  className="btn ghost"
-                  onClick={() => deleteDebtScheduleEntry(debtScheduleEditor)}
-                >
-                  Удалить
-                </button>
-              )}
-            </div>
-            {debtScheduleEditor.mode === "edit" && !debtScheduleEditor.paid && (
-              <button
-                className="btn"
-                onClick={() =>
-                  openDebtPaymentConfirm(
-                    { ...debtScheduleEditor, debtId: debtScheduleEditor.debtId },
-                    debtDetail
-                  )
-                }
-              >
-                Принять платеж
-              </button>
-            )}
-            {debtScheduleMessage && <div className="error">{debtScheduleMessage}</div>}
-          </section>
-        );
-      }
-
       if (debtDetail) {
-        const sign = debtDetail.kind === "owed_to_me" ? 1 : -1;
-        const debtAlertTone = getDebtAlertTone(debtDetail);
         const debtCurrencySymbol = currencySymbolByCode(debtDetail.currencyCode);
         return (
           <section className="overview-shell">
@@ -3886,164 +3269,26 @@ function App() {
                 Закрыть
               </button>
             </div>
-            <div
-              className={`debt-summary debt-alert ${
-                debtAlertTone ? debtAlertTone : ""
-              }`}
-            >
+            <div className="debt-summary">
               <div className="debt-summary-amount">
-                {formatMoney(debtDetail.remaining, debtCurrencySymbol)}
+                {formatMoney(debtDetail.totalAmount, debtCurrencySymbol)}
               </div>
               <div className="debt-summary-meta">
                 <div className="debt-summary-next">
-                  Следующий платеж:{" "}
-                  {debtDetail.nextPaymentDate && debtDetail.nextPaymentAmount !== null
-                    ? `${formatDisplayDate(debtDetail.nextPaymentDate)} — ${formatMoney(
-                        debtDetail.nextPaymentAmount,
-                        debtCurrencySymbol
-                      )}`
-                    : "—"}
+                  Сумма займа: {formatMoney(debtDetail.principalAmount, debtCurrencySymbol)}
                 </div>
-                <div className="debt-summary-divider" />
+                <div className="debt-summary-next">
+                  Дата выдачи:{" "}
+                  {debtDetail.issuedDate ? formatDisplayDate(debtDetail.issuedDate) : "—"}
+                </div>
                 <div className="debt-summary-next">
                   Дата возврата:{" "}
                   {debtDetail.dueDate ? formatDisplayDate(debtDetail.dueDate) : "—"}
                 </div>
+                {debtDetail.notes && (
+                  <div className="debt-summary-next">Комментарий: {debtDetail.notes}</div>
+                )}
               </div>
-              <div className="goal-progress">
-                <div
-                  className="goal-progress-fill"
-                  style={{
-                    width: `${
-                      debtDetail.totalAmount > 0
-                        ? Math.min(
-                            100,
-                            Math.round((debtDetail.paidTotal / debtDetail.totalAmount) * 100)
-                          )
-                        : 0
-                    }%`,
-                    background: "#0f172a",
-                  }}
-                />
-              </div>
-            <div className="debt-summary-sub">
-              Возвращено {formatMoney(debtDetail.paidTotal, debtCurrencySymbol)} из{" "}
-              {formatMoney(debtDetail.totalAmount, debtCurrencySymbol)}
-            </div>
-            {debtDetail.kind === "owed_to_me" &&
-              Number(debtDetail.interestEarned || 0) > 0 && (
-                <div className="debt-summary-sub">
-                  Заработано{" "}
-                  {formatMoney(debtDetail.interestEarned, debtCurrencySymbol)}
-                </div>
-              )}
-          </div>
-            <div className="row">
-              <input
-                className="input"
-                value={debtSearch}
-                onChange={(e) => setDebtSearch(e.target.value)}
-                placeholder="Поиск по сумме или заметке"
-              />
-              <button
-                className="btn ghost"
-                onClick={() => {
-                  setCustomRangeDraft(customRange);
-                  setShowCustomRange(historyPeriod === "custom");
-                  setShowPeriodSheet(true);
-                }}
-              >
-                Период
-              </button>
-            </div>
-            {periodRangeText && <div className="history-range">{periodRangeText}</div>}
-            <button
-              className="btn"
-              onClick={() =>
-                setDebtScheduleEditor({
-                  mode: "create",
-                  debtId: debtDetail.id,
-                  amount: "",
-                  dueDate: formatDateInput(new Date()),
-                  note: "",
-                })
-              }
-            >
-              Добавить платеж
-            </button>
-            <div className="history-list">
-              {debtScheduleGroups.length === 0 ? (
-                <div className="muted">Пока нет платежей</div>
-              ) : (
-                debtScheduleGroups.map((group) => (
-                  <div key={group.key} className="history-group">
-                    <div className="history-date-row">
-                      <div className="history-date">{group.key}</div>
-                    </div>
-                    <div className="history-rows">
-                      {group.items.map((entry) => (
-                        <div
-                          key={entry.id}
-                          className={`history-row debt-row ${entry.paid ? "paid" : ""}`}
-                        >
-                          <label className="debt-check">
-                            <input
-                              type="checkbox"
-                              checked={entry.paid}
-                              onChange={(e) => {
-                                if (entry.paid) return;
-                                if (e.target.checked) {
-                                  openDebtPaymentConfirm(
-                                    { ...entry, debtId: debtDetail.id },
-                                    debtDetail
-                                  );
-                                }
-                              }}
-                            />
-                          </label>
-                          <button
-                            className="history-row-main"
-                            onClick={() =>
-                              setDebtScheduleEditor({
-                                mode: "edit",
-                                debtId: debtDetail.id,
-                                id: entry.id,
-                                amount: entry.amount,
-                                dueDate: entry.dueDate,
-                                note: entry.note,
-                                paid: entry.paid,
-                                paidAmount: entry.paidAmount,
-                              })
-                            }
-                          >
-                            <span className="history-label">
-                              {entry.note || "Платеж"}
-                            </span>
-                          <span className="history-meta">
-                            {entry.paid
-                              ? "Оплачено"
-                              : entry.paidAmount
-                                ? "Частично"
-                                : "Ожидается"}
-                          </span>
-                          </button>
-                          <span
-                            className={`history-amount ${
-                              sign > 0 ? "income" : "expense"
-                            }`}
-                          >
-                            {formatSignedMoney(
-                              entry.amount,
-                              sign > 0 ? "income" : "expense",
-                              debtCurrencySymbol
-                            )}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
             </div>
             <button
               className="btn ghost"
@@ -4055,17 +3300,10 @@ function App() {
                   name: debtDetail.name,
                   principalAmount: debtDetail.principalAmount,
                   totalAmount: debtDetail.totalAmount,
-                  rate: debtDetail.rate,
-                  termMonths: debtDetail.termMonths,
-                  paymentType: debtDetail.paymentType,
-                  paymentsCount: debtDetail.paymentsCount,
-                  frequency: debtDetail.frequency,
                   issuedDate: debtDetail.issuedDate,
                   dueDate: debtDetail.dueDate,
                   notes: debtDetail.notes || "",
-                  scheduleEnabled: debtDetail.scheduleEnabled,
                   currencyCode: debtDetail.currencyCode,
-                  firstPaymentDate: debtDetail.firstPaymentDate || debtDetail.nextPaymentDate,
                 })
               }
             >
@@ -4075,73 +3313,6 @@ function App() {
               Удалить
             </button>
             {debtDeleteTarget?.id === debtDetail.id ? debtDeletePanel : null}
-            {debtPaymentConfirm?.debt?.id === debtDetail.id && (
-              <div className="goal-delete">
-                <div className="goal-delete-panel">
-                  <div className="label">Подтвердить зачисление</div>
-                  <label className="label">Сумма платежа</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    value={debtPaymentAmount}
-                    onChange={(e) => setDebtPaymentAmount(e.target.value)}
-                  />
-                  <label className="label">Счет</label>
-                  {accounts.length ? (
-                    <select
-                      className="select"
-                      value={debtPaymentAccount}
-                      onChange={(e) => setDebtPaymentAccount(e.target.value)}
-                    >
-                      {accounts.map((acc) => (
-                        <option key={acc.id} value={acc.name}>
-                          {acc.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="muted">Нет счетов</div>
-                  )}
-                  {Number(debtDetail.totalAmount || 0) >
-                    Number(debtDetail.principalAmount || 0) && (
-                    <div className="muted">
-                      Проценты по займу будут рассчитаны автоматически.
-                    </div>
-                  )}
-                  {Number(debtDetail.totalAmount || 0) >
-                    Number(debtDetail.principalAmount || 0) && (
-                    <>
-                      <label className="label">Источник дохода (проценты)</label>
-                      {incomeSources.length ? (
-                        <select
-                          className="select"
-                          value={debtPaymentIncomeSource}
-                          onChange={(e) => setDebtPaymentIncomeSource(e.target.value)}
-                        >
-                          {incomeSources.map((src) => (
-                            <option key={src.id} value={src.name}>
-                              {src.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="muted">Добавьте источник дохода</div>
-                      )}
-                    </>
-                  )}
-                  {debtPaymentError && <div className="error">{debtPaymentError}</div>}
-                  <div className="row">
-                    <button className="btn" onClick={confirmDebtPayment}>
-                      Подтвердить
-                    </button>
-                    <button className="btn ghost" onClick={closeDebtPaymentConfirm}>
-                      Отмена
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </section>
         );
       }
@@ -4176,16 +3347,11 @@ function App() {
                 <div className="muted">Пока нет записей</div>
               ) : (
                 debtListItems.map((item) => {
-                  const debtAlertTone = getDebtAlertTone(item);
-                  const progress =
-                    item.totalAmount > 0 ? item.paidTotal / item.totalAmount : 0;
                   const debtCurrencySymbol = currencySymbolByCode(item.currencyCode);
                   return (
                     <button
                       key={item.id}
-                      className={`debt-card debt-alert ${
-                        debtAlertTone ? debtAlertTone : ""
-                      }`}
+                      className="debt-card"
                       onClick={() =>
                         setDebtDetail({
                           ...item,
@@ -4196,23 +3362,20 @@ function App() {
                       <div className="debt-card-top">
                         <span className="debt-card-name">{item.name}</span>
                         <span className="debt-card-amount">
-                          {formatMoney(item.remaining, debtCurrencySymbol)}
+                          {formatMoney(item.totalAmount, debtCurrencySymbol)}
                         </span>
                       </div>
                       <div className="debt-card-meta">
                         <div className="debt-card-meta-line">
-                          <span>Следующий платеж:</span>
+                          <span>Сумма займа:</span>
+                          <span>{formatMoney(item.principalAmount, debtCurrencySymbol)}</span>
+                        </div>
+                        <div className="debt-card-meta-line">
+                          <span>Дата выдачи:</span>
                           <span>
-                            {item.nextPaymentDate
-                              ? formatDisplayDate(item.nextPaymentDate)
-                              : "—"}
-                            {item.nextPaymentAmount !== null &&
-                            item.nextPaymentAmount !== undefined
-                              ? ` · ${formatMoney(item.nextPaymentAmount, debtCurrencySymbol)}`
-                              : ""}
+                            {item.issuedDate ? formatDisplayDate(item.issuedDate) : "—"}
                           </span>
                         </div>
-                        <div className="debt-card-divider" />
                         <div className="debt-card-meta-line">
                           <span>Дата возврата:</span>
                           <span>
@@ -4220,25 +3383,6 @@ function App() {
                           </span>
                         </div>
                       </div>
-                      <div className="goal-progress">
-                        <div
-                          className="goal-progress-fill"
-                          style={{
-                            width: `${Math.round(progress * 100)}%`,
-                            background: "#0f172a",
-                          }}
-                        />
-                      </div>
-                      <div className="debt-card-sub">
-                        Возвращено {formatMoney(item.paidTotal, debtCurrencySymbol)} из{" "}
-                        {formatMoney(item.totalAmount, debtCurrencySymbol)}
-                      </div>
-                      {item.kind === "owed_to_me" && Number(item.interestEarned || 0) > 0 && (
-                        <div className="debt-card-sub">
-                          Заработано{" "}
-                          {formatMoney(item.interestEarned, debtCurrencySymbol)}
-                        </div>
-                      )}
                     </button>
                   );
                 })
