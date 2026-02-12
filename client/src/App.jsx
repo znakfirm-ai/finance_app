@@ -10,7 +10,15 @@ const normalizeApiBase = (value) => {
 };
 
 const API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
-const apiUrl = (path) => (API_BASE ? `${API_BASE}${path}` : path);
+const apiUrl = (path) => {
+  try {
+    const base =
+      API_BASE || (typeof window !== "undefined" ? window.location.origin : "");
+    return new URL(path, base || "http://localhost").toString();
+  } catch (_) {
+    return API_BASE ? `${API_BASE}${path}` : path;
+  }
+};
 
 const IconHome = () => (
   <svg viewBox="0 0 24 24" className="quick-icon" aria-hidden="true">
