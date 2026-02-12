@@ -23,6 +23,9 @@ const shouldUseSameOriginApi = () => {
   return /onrender\.com$/i.test(API_BASE.replace(/^https?:\/\//i, "").split("/")[0]);
 };
 const apiUrl = (path) => {
+  if (typeof window !== "undefined" && !import.meta.env.DEV && path.startsWith("/api")) {
+    return path;
+  }
   try {
     const base =
       (path.startsWith("/api") && shouldUseSameOriginApi()
@@ -1699,9 +1702,6 @@ function App() {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", url, true);
         xhr.setRequestHeader("Content-Type", "application/json");
-        if (authHeaders["x-telegram-init-data"]) {
-          xhr.setRequestHeader("x-telegram-init-data", authHeaders["x-telegram-init-data"]);
-        }
         xhr.onreadystatechange = () => {
           if (xhr.readyState !== 4) return;
           const text = xhr.responseText || "";
