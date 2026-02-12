@@ -413,6 +413,18 @@ function App() {
         setTelegramReady(true);
         return;
       }
+      // Fallback when Telegram WebApp is present but doesn't provide initData/user
+      const storageKey = "finance_web_user_id";
+      let id = localStorage.getItem(storageKey);
+      if (!id) {
+        id =
+          (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
+          `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        localStorage.setItem(storageKey, id);
+      }
+      setWebUserId(id);
+      setTelegramReady(true);
+      return;
     }
     if (!tg) {
       const storageKey = "finance_web_user_id";
