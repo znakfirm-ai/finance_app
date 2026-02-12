@@ -403,12 +403,31 @@ function App() {
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
+    const readInitDataFromUrl = () => {
+      if (typeof window === "undefined") return null;
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const raw =
+        searchParams.get("tgWebAppData") ||
+        searchParams.get("initData") ||
+        hashParams.get("tgWebAppData") ||
+        hashParams.get("initData");
+      if (!raw) return null;
+      try {
+        return decodeURIComponent(raw);
+      } catch (_) {
+        return raw;
+      }
+    };
+    const fallbackInitData = readInitDataFromUrl();
     if (tg) {
       tg.ready();
       if (tg.initData) setInitData(tg.initData);
+      else if (fallbackInitData) setInitData(fallbackInitData);
       setTelegramReady(true);
       return;
     }
+    if (fallbackInitData) setInitData(fallbackInitData);
     setTelegramReady(true);
   }, []);
 
