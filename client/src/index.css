@@ -4,6 +4,7 @@
   font-family: "Manrope", system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
+  font-variant-numeric: lining-nums proportional-nums;
   color: #111827;
   background: #f3f4f6;
   text-rendering: optimizeLegibility;
@@ -20,6 +21,15 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background: radial-gradient(1200px 600px at 10% 0%, #eef2ff 0%, #f3f4f6 55%, #ffffff 100%);
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-variant-numeric: inherit;
 }
 
 a {
