@@ -10,6 +10,22 @@ const normalizeApiBase = (value) => {
 };
 
 const RAW_API_BASE = normalizeApiBase(import.meta.env.VITE_API_BASE_URL);
+const getStoredWebUserId = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const storageKey = "finance_web_user_id";
+    let id = localStorage.getItem(storageKey);
+    if (!id) {
+      id =
+        (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
+        `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(storageKey, id);
+    }
+    return id;
+  } catch (_) {
+    return null;
+  }
+};
 const API_BASE = RAW_API_BASE;
 const isVercelHost = () => {
   if (typeof window === "undefined") return false;
@@ -338,7 +354,7 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState(null);
-  const [webUserId, setWebUserId] = useState(null);
+  const [webUserId, setWebUserId] = useState(() => getStoredWebUserId());
   const [telegramReady, setTelegramReady] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [categoryEditor, setCategoryEditor] = useState(null);
@@ -413,29 +429,14 @@ function App() {
         setTelegramReady(true);
         return;
       }
-      // Fallback when Telegram WebApp is present but doesn't provide initData/user
-      const storageKey = "finance_web_user_id";
-      let id = localStorage.getItem(storageKey);
-      if (!id) {
-        id =
-          (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
-          `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        localStorage.setItem(storageKey, id);
-      }
-      setWebUserId(id);
+      const fallbackId = getStoredWebUserId();
+      if (fallbackId) setWebUserId(fallbackId);
       setTelegramReady(true);
       return;
     }
     if (!tg) {
-      const storageKey = "finance_web_user_id";
-      let id = localStorage.getItem(storageKey);
-      if (!id) {
-        id =
-          (typeof crypto !== "undefined" && crypto.randomUUID && crypto.randomUUID()) ||
-          `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        localStorage.setItem(storageKey, id);
-      }
-      setWebUserId(id);
+      const fallbackId = getStoredWebUserId();
+      if (fallbackId) setWebUserId(fallbackId);
     }
     setTelegramReady(true);
   }, []);
